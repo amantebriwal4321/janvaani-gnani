@@ -85,6 +85,17 @@ STRINGS: dict[str, dict[str, str]] = {
         "bn": "ঠিক আছে, লিখে নিলাম।",
         "ml": "ശരി, എഴുതി.",
     },
+    "filler": {
+        "hi": "हाँ, सुन रही हूँ।",
+        "hi-en": "Haan, sun rahi hoon.",
+        "en": "Yes, I'm with you.",
+        "kn": "ಹೌದು, ಕೇಳುತ್ತಿದ್ದೇನೆ.",
+        "te": "అవును, వింటున్నాను.",
+        "ta": "ஆம், கேட்கிறேன்.",
+        "mr": "हो, ऐकत आहे.",
+        "bn": "হ্যাঁ, শুনছি।",
+        "ml": "അതെ, ഞാൻ കേൾക്കുന്നു.",
+    },
     "unclear": {
         "hi": "मैं फिर से सुनना चाहती हूँ। एक छोटी बात बताइए।",
         "hi-en": "Main phir se sunna chahti hoon. Ek chhoti baat bataiye.",
