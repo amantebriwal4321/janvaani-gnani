@@ -1,0 +1,8 @@
+services:
+  janvaani:
+    build: .
+    ports:
+      - "43123:43123"
+      - "8766:8766"
+    env_file:
+      - .env
