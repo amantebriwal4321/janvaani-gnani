@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiBase, wsBase } from "./endpoints";
 import { BROWSER_LANG } from "./phrases";
 
-export type Phase = "idle" | "connecting" | "listening" | "speaking" | "ended" | "error";
+export type Phase = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "ended" | "error";
 
 export type ProfileRow = { field: string; label: string; value: string; heard?: string };
 export type SchemeMatch = {
@@ -34,7 +35,7 @@ export type CallState = {
   scheme_count: number;
 };
 
-export type Caption = { role: "user" | "assistant"; text: string };
+export type Caption = { id: number; role: "user" | "assistant"; text: string; filler?: boolean };
 
 export type Health = {
   ok: boolean;
@@ -52,25 +53,16 @@ type Player = {
   remaining: () => number;
 };
 
-function apiBase() {
-  const configured = process.env.NEXT_PUBLIC_API_BASE;
-  if (configured) return configured.replace(/\/$/, "");
-  if (typeof window === "undefined") return "http://127.0.0.1:8766";
-  const host = window.location.hostname;
-  const local =
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host.endsWith(".local") ||
-    /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
-  if (local) return `${window.location.protocol}//${host}:8766`;
-  return window.location.origin;
-}
-
 function makePlayer(ctx: AudioContext): Player {
+  const gain = ctx.createGain();
+  gain.connect(ctx.destination);
   const nodes: AudioBufferSourceNode[] = [];
   let next = 0;
   return {
     push(pcm: ArrayBuffer) {
+      const now = ctx.currentTime;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(1, now);
       const view = new Int16Array(pcm.slice(0));
       const floats = new Float32Array(view.length);
       for (let i = 0; i < view.length; i++) floats[i] = view[i] / 32768;
@@ -78,8 +70,7 @@ function makePlayer(ctx: AudioContext): Player {
       buffer.copyToChannel(floats, 0);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(ctx.destination);
-      const now = ctx.currentTime;
+      source.connect(gain);
       if (next < now + 0.02) next = now + 0.04;
       source.start(next);
       next += buffer.duration;
@@ -90,20 +81,34 @@ function makePlayer(ctx: AudioContext): Player {
       };
     },
     stop() {
-      for (const source of nodes) {
-        try {
-          source.stop();
-        } catch {
-          /* already stopped */
-        }
-      }
+      const now = ctx.currentTime;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), now);
+      gain.gain.linearRampToValueAtTime(0.0001, now + 0.07);
+      const live = nodes.slice();
       nodes.length = 0;
       next = 0;
+      window.setTimeout(() => {
+        for (const source of live) {
+          try {
+            source.stop();
+          } catch {
+            /* already stopped */
+          }
+        }
+      }, 80);
     },
     remaining() {
       return Math.max(0, next - ctx.currentTime);
     },
   };
+}
+
+function pickVoice(lang: string): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis?.getVoices?.() ?? [];
+  const prefix = (lang || "hi-IN").slice(0, 2).toLowerCase();
+  const same = voices.filter((voice) => voice.lang.toLowerCase().startsWith(prefix));
+  return same.find((voice) => /female|woman|natural/i.test(voice.name)) || same[0] || null;
 }
 
 export function useCall(language: string) {
@@ -114,6 +119,8 @@ export function useCall(language: string) {
   const [error, setError] = useState<string | null>(null);
   const [micNote, setMicNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [level, setLevel] = useState(0.15);
+  const [demo, setDemo] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const playerRef = useRef<Player | null>(null);
@@ -123,9 +130,16 @@ export function useCall(language: string) {
   const speakTurn = useRef<number | null>(null);
   const speakStarted = useRef(0);
   const hot = useRef(0);
+  const captionId = useRef(1);
+  const thinkStamp = useRef(0);
+  const meterAt = useRef(0);
   const languageRef = useRef(language);
   languageRef.current = language;
-  phaseRef.current = phase;
+
+  const go = useCallback((next: Phase) => {
+    phaseRef.current = next;
+    setPhase(next);
+  }, []);
 
   useEffect(() => {
     let gone = false;
@@ -135,7 +149,7 @@ export function useCall(language: string) {
         if (!gone) setHealth(body);
       })
       .catch(() => {
-        if (!gone) setError("The JanVaani line is not up. Start the server and try the call again.");
+        /* The call button reports a down line. The landing still explains the product. */
       });
     return () => {
       gone = true;
@@ -157,9 +171,16 @@ export function useCall(language: string) {
   const speakOnDevice = useCallback(
     (text: string, lang: string, turnId: number) => {
       const clean = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      if (!clean || !window.speechSynthesis) {
+        finishSpeak(turnId);
+        return;
+      }
       const utterance = new SpeechSynthesisUtterance(clean);
       utterance.lang = lang || "hi-IN";
-      utterance.rate = 0.95;
+      utterance.rate = 0.96;
+      utterance.pitch = 1.04;
+      const voice = pickVoice(utterance.lang);
+      if (voice) utterance.voice = voice;
       let settled = false;
       const done = () => {
         if (settled) return;
@@ -170,10 +191,20 @@ export function useCall(language: string) {
       utterance.onerror = done;
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utterance);
-      window.setTimeout(done, Math.min(22000, 900 + clean.length * 75));
+      window.setTimeout(done, Math.min(20000, 700 + clean.length * 68));
     },
     [finishSpeak],
   );
+
+  const armThinking = useCallback(() => {
+    const stamp = ++thinkStamp.current;
+    window.setTimeout(() => {
+      if (thinkStamp.current !== stamp) return;
+      if (phaseRef.current === "listening" || phaseRef.current === "speaking" || phaseRef.current === "connecting") {
+        go("thinking");
+      }
+    }, 180);
+  }, [go]);
 
   const hangup = useCallback(() => {
     stopAudio();
@@ -181,8 +212,9 @@ export function useCall(language: string) {
     streamRef.current = null;
     wsRef.current?.close();
     wsRef.current = null;
-    setPhase("ended");
-  }, [stopAudio]);
+    setLevel(0.15);
+    go("ended");
+  }, [go, stopAudio]);
 
   const barge = useCallback(() => {
     hot.current = 0;
@@ -191,132 +223,187 @@ export function useCall(language: string) {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "barge_in" }));
     }
-    if (phaseRef.current === "speaking") setPhase("listening");
-  }, [stopAudio]);
+    if (phaseRef.current === "speaking" || phaseRef.current === "thinking") go("listening");
+  }, [go, stopAudio]);
 
-  const sendText = useCallback((text: string, nextLanguage?: string) => {
-    const socket = wsRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    if (nextLanguage && nextLanguage !== "auto") {
-      socket.send(JSON.stringify({ type: "set_language", language: nextLanguage }));
-    }
-    socket.send(JSON.stringify({ type: "utterance", text }));
-  }, []);
-
-  const start = useCallback(async () => {
-    setError(null);
-    setMicNote(null);
-    setCaptions([]);
-    setCallState(null);
-    setCopied(false);
-    setPhase("connecting");
-    const socket = new WebSocket(`${apiBase().replace(/^http/, "ws")}/ws/call`);
-    socket.binaryType = "arraybuffer";
-    wsRef.current = socket;
-
-    socket.onmessage = (event) => {
-      if (typeof event.data !== "string") {
-        playerRef.current?.push(event.data as ArrayBuffer);
-        return;
+  const sendText = useCallback(
+    (text: string, nextLanguage?: string) => {
+      const socket = wsRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      if (nextLanguage && nextLanguage !== "auto") {
+        socket.send(JSON.stringify({ type: "set_language", language: nextLanguage }));
       }
-      const message = JSON.parse(event.data);
-      if (message.type === "ready") {
-        setPhase("listening");
-      } else if (message.type === "status") {
-        if (message.phase === "speaking") {
-          setPhase("speaking");
+      armThinking();
+      socket.send(JSON.stringify({ type: "utterance", text }));
+    },
+    [armThinking],
+  );
+
+  const start = useCallback(
+    async (options?: { demo?: boolean }) => {
+      const asDemo = Boolean(options?.demo);
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        const unlock = new SpeechSynthesisUtterance(" ");
+        unlock.volume = 0;
+        window.speechSynthesis.speak(unlock);
+      }
+      setError(null);
+      setMicNote(null);
+      setCaptions([]);
+      setCopied(false);
+      setDemo(asDemo);
+      setLevel(0.15);
+      stopAudio();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      wsRef.current?.close();
+      void ctxRef.current?.close();
+
+      const ctx = new AudioContext();
+      ctxRef.current = ctx;
+      void ctx.resume();
+      playerRef.current = makePlayer(ctx);
+      go("connecting");
+
+      const socket = new WebSocket(`${wsBase()}/ws/call`);
+      socket.binaryType = "arraybuffer";
+      wsRef.current = socket;
+
+      const pushCaption = (role: "user" | "assistant", text: string, filler = false) => {
+        const id = captionId.current++;
+        setCaptions((current) => {
+          const kept = filler ? current.filter((line) => !line.filler) : current.filter((line) => !line.filler);
+          return [...kept, { id, role, text, filler }].slice(-16);
+        });
+      };
+
+      socket.onmessage = (event) => {
+        if (typeof event.data !== "string") {
+          playerRef.current?.push(event.data as ArrayBuffer);
+          return;
+        }
+        const message = JSON.parse(event.data);
+        if (message.type === "ready") {
+          setCallState(null);
+          setDemo(Boolean(message.demo));
+          go("listening");
+        } else if (message.type === "status") {
+          if (message.phase === "speaking") {
+            thinkStamp.current += 1;
+            go("speaking");
+            speakStarted.current = Date.now();
+            speakTurn.current = message.turnId ?? null;
+          } else if (message.phase === "thinking") {
+            armThinking();
+          } else if (message.phase === "listening") {
+            if (message.barged) stopAudio();
+            if (phaseRef.current !== "thinking") go("listening");
+            if (message.barged) go("listening");
+          }
+        } else if (message.type === "filler") {
+          thinkStamp.current += 1;
+          go("thinking");
+          pushCaption("assistant", message.text, true);
+        } else if (message.type === "transcript") {
+          pushCaption(message.role, message.text, false);
+        } else if (message.type === "state") {
+          setCallState(message.state);
+        } else if (message.type === "clear") {
+          stopAudio();
+        } else if (message.type === "speak" && message.audio === "browser") {
+          thinkStamp.current += 1;
+          go("speaking");
           speakStarted.current = Date.now();
           speakTurn.current = message.turnId ?? null;
-        } else if (message.phase === "listening") {
-          if (message.barged) stopAudio();
-          setPhase("listening");
-        }
-      } else if (message.type === "transcript") {
-        setCaptions((current) => [...current, { role: message.role, text: message.text }].slice(-8));
-      } else if (message.type === "state") {
-        setCallState(message.state);
-      } else if (message.type === "clear") {
-        stopAudio();
-        setPhase("listening");
-      } else if (message.type === "speak" && message.audio === "browser") {
-        setPhase("speaking");
-        speakStarted.current = Date.now();
-        speakTurn.current = message.turnId ?? null;
-        const lang = message.browserLang || BROWSER_LANG[message.language] || "hi-IN";
-        speakOnDevice(message.text || "", lang, message.turnId);
-      } else if (message.type === "audio_start") {
-        setPhase("speaking");
-        speakStarted.current = Date.now();
-        speakTurn.current = message.turnId ?? null;
-        playerRef.current?.stop();
-      } else if (message.type === "audio_end") {
-        const turnId = message.turnId as number;
-        const wait = () => {
-          const left = playerRef.current?.remaining() ?? 0;
-          if (left > 0.08) {
-            window.setTimeout(wait, 80);
-            return;
-          }
-          finishSpeak(turnId);
-        };
-        wait();
-      } else if (message.type === "error") {
-        setError(message.message);
-      }
-    };
-
-    socket.onerror = () => setError("The call could not connect. Check that the backend is running.");
-    socket.onclose = () => {
-      if (phaseRef.current !== "ended" && phaseRef.current !== "idle") setPhase("ended");
-    };
-
-    await new Promise<void>((resolve, reject) => {
-      socket.onopen = () => resolve();
-      socket.addEventListener("error", () => reject(new Error("socket")), { once: true });
-    }).catch(() => {
-      setError("The call could not connect. Check that the backend is running.");
-      setPhase("error");
-    });
-
-    if (socket.readyState !== WebSocket.OPEN) {
-      setPhase("error");
-      return;
-    }
-    socket.send(JSON.stringify({ type: "start", language: languageRef.current }));
-
-    try {
-      const media = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
-      });
-      streamRef.current = media;
-      const ctx = new AudioContext();
-      ctxRef.current = ctx;
-      void ctx.resume();
-      playerRef.current = makePlayer(ctx);
-      await ctx.audioWorklet.addModule("/pcm-worklet.js");
-      const source = ctx.createMediaStreamSource(media);
-      const worklet = new AudioWorkletNode(ctx, "pcm-downsample");
-      worklet.port.onmessage = (event) => {
-        const frame = event.data;
-        if (!frame || frame.type !== "frame") return;
-        if (socket.readyState === WebSocket.OPEN) socket.send(frame.pcm.buffer);
-        const speaking = phaseRef.current === "speaking" && Date.now() - speakStarted.current > 700;
-        if (speaking && frame.rms > 0.11) {
-          hot.current += 1;
-          if (hot.current >= 4) barge();
-        } else if (frame.rms < 0.06) {
-          hot.current = 0;
+          const lang = message.browserLang || BROWSER_LANG[message.language] || "hi-IN";
+          speakOnDevice(message.text || "", lang, message.turnId);
+        } else if (message.type === "audio_start") {
+          thinkStamp.current += 1;
+          go("speaking");
+          speakStarted.current = Date.now();
+          speakTurn.current = message.turnId ?? null;
+          playerRef.current?.stop();
+        } else if (message.type === "audio_end") {
+          const turnId = message.turnId as number;
+          const wait = () => {
+            const left = playerRef.current?.remaining() ?? 0;
+            if (left > 0.08) {
+              window.setTimeout(wait, 80);
+              return;
+            }
+            finishSpeak(turnId);
+          };
+          wait();
+        } else if (message.type === "error") {
+          setError(message.message);
         }
       };
-      source.connect(worklet);
-    } catch {
-      const ctx = new AudioContext();
-      ctxRef.current = ctx;
-      void ctx.resume();
-      playerRef.current = makePlayer(ctx);
-      setMicNote("Microphone is off. Tap a phrase, or type, and the line still answers.");
-    }
-  }, [barge, finishSpeak, speakOnDevice, stopAudio]);
+
+      socket.onerror = () => {
+        setError("The call could not connect. Check that the voice server is running.");
+      };
+      socket.onclose = () => {
+        if (phaseRef.current !== "ended" && phaseRef.current !== "idle" && phaseRef.current !== "error") {
+          setError("The line dropped. Your slip is still on this page. Tap Start talking to call again.");
+          go("error");
+        }
+      };
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          socket.onopen = () => resolve();
+          socket.addEventListener("error", () => reject(new Error("socket")), { once: true });
+        });
+      } catch {
+        setError("The call could not connect. Check that the voice server is running.");
+        go("error");
+        return;
+      }
+
+      if (socket.readyState !== WebSocket.OPEN) {
+        go("error");
+        return;
+      }
+      const chosen = languageRef.current;
+      if (asDemo) {
+        socket.send(JSON.stringify({ type: "demo", language: chosen === "auto" ? "hi" : chosen }));
+        setMicNote("Demo mode. A practice household speaks for you, so the microphone stays off.");
+        return;
+      }
+      socket.send(JSON.stringify({ type: "start", language: chosen }));
+
+      try {
+        const media = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+        });
+        streamRef.current = media;
+        await ctx.audioWorklet.addModule("/pcm-worklet.js");
+        const source = ctx.createMediaStreamSource(media);
+        const worklet = new AudioWorkletNode(ctx, "pcm-downsample");
+        worklet.port.onmessage = (event) => {
+          const frame = event.data;
+          if (!frame || frame.type !== "frame") return;
+          if (socket.readyState === WebSocket.OPEN) socket.send(frame.pcm.buffer);
+          const now = Date.now();
+          if (now - meterAt.current > 80) {
+            meterAt.current = now;
+            setLevel(Math.max(0.12, Math.min(1, frame.rms * 5)));
+          }
+          const speaking = phaseRef.current === "speaking" && now - speakStarted.current > 420;
+          if (speaking && frame.rms > 0.11) {
+            hot.current += 1;
+            if (hot.current >= 4) barge();
+          } else if (frame.rms < 0.06) {
+            hot.current = 0;
+          }
+        };
+        source.connect(worklet);
+      } catch {
+        setMicNote("Microphone is off. Tap a phrase, or type, and the line still answers.");
+      }
+    },
+    [armThinking, barge, finishSpeak, go, speakOnDevice, stopAudio],
+  );
 
   useEffect(() => {
     return () => {
@@ -348,6 +435,8 @@ export function useCall(language: string) {
     error,
     micNote,
     copied,
+    level,
+    demo,
     apiBase: apiBase(),
     start,
     hangup,

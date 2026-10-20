@@ -6,11 +6,13 @@ import asyncio
 
 from app.audio import pcm16_rms
 from app.config import settings
+from app.demo import DEMO_SCRIPT
 from app.dialogue import strip_tags
 from app.engine import Brain, echo_of_assistant
 from app.gnani import STTEvent, STTStream, stt_code, synthesize
 from app.languages import BROWSER_LANG
 from app.llm import LLMClient
+from app.pace import FILLER_AFTER, filler_line, recover_message, split_spoken
 
 SESSIONS: dict[str, "CallSession"] = {}
 
@@ -26,8 +28,11 @@ class CallSession:
         self.started = False
         self.closed = False
         self.hot_frames = 0
+        self.demo = False
         self._stt_task: asyncio.Task | None = None
         self._stt: STTStream | None = None
+        self._spoke = asyncio.Event()
+        self._demo_task: asyncio.Task | None = None
         SESSIONS[self.brain.session_id] = self
 
     async def start(self, language: str) -> None:
@@ -46,9 +51,33 @@ class CallSession:
                 "mode": "gnani" if settings.gnani_on else "mock",
                 "language": self.brain.language,
                 "sampleRate": 8000,
+                "demo": self.demo,
+                "voice": settings.gnani_tts_voice,
             }
         )
         await self._publish(result, user_text=None)
+
+    async def play_demo(self, language: str = "hi") -> None:
+        """Speak the greeting, then the scripted Kolar household. Safe to run as a task."""
+        if self.closed or self.started:
+            return
+        self.demo = True
+        try:
+            await self.start(language or "hi")
+            for index, turn in enumerate(DEMO_SCRIPT):
+                if self.closed:
+                    return
+                await self._wait_quiet(18 if index == 0 else 22)
+                if self.closed:
+                    return
+                if turn.language:
+                    self.brain.set_language(turn.language)
+                await self.on_text(turn.text, "demo")
+        except Exception:
+            if not self.closed:
+                await self.transport.send_json(
+                    {"type": "error", "recoverable": True, "message": recover_message()}
+                )
 
     async def on_text(self, text: str, source: str) -> None:
         text = (text or "").strip()
@@ -57,9 +86,28 @@ class CallSession:
         if source == "stt" and echo_of_assistant(text, self.brain.last_reply):
             return
         async with self.turn_lock:
-            await self.barge()
-            llm = LLMClient() if settings.llm_on else None
-            result = await self.brain.utterance(text, llm)
+            await self.barge(notify=False)
+            await self.transport.send_json({"type": "status", "phase": "thinking"})
+            turn_gen = self.generation
+            filler_task = asyncio.create_task(self._maybe_filler(turn_gen))
+            try:
+                llm = LLMClient() if settings.llm_on else None
+                result = await self.brain.utterance(text, llm)
+            except Exception:
+                filler_task.cancel()
+                await self.transport.send_json(
+                    {"type": "error", "recoverable": True, "message": recover_message()}
+                )
+                await self.transport.send_json({"type": "status", "phase": "listening"})
+                return
+            await self.barge(notify=False)
+            filler_task.cancel()
+            try:
+                await filler_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
             await self._publish(result, user_text=text, source=source)
 
     async def on_stt_event(self, event: STTEvent) -> None:
@@ -90,9 +138,10 @@ class CallSession:
     async def on_speak_done(self, turn_id) -> None:
         if turn_id == self.generation:
             self.speaking = False
+            self._spoke.set()
             await self.transport.send_json({"type": "status", "phase": "listening"})
 
-    async def barge(self) -> None:
+    async def barge(self, *, notify: bool = True) -> None:
         was = self.speaking or (self.speak_task is not None and not self.speak_task.done())
         self.generation += 1
         self.speaking = False
@@ -100,13 +149,16 @@ class CallSession:
             self.speak_task.cancel()
         if was:
             await self.transport.clear_playback()
-            await self.transport.send_json({"type": "status", "phase": "listening", "barged": True})
+            if notify:
+                await self.transport.send_json({"type": "status", "phase": "listening", "barged": True})
 
     async def close(self) -> None:
         self.closed = True
         self.generation += 1
         if self.speak_task and not self.speak_task.done():
             self.speak_task.cancel()
+        if self._demo_task and not self._demo_task.done():
+            self._demo_task.cancel()
         if self._stt_task and not self._stt_task.done():
             self._stt_task.cancel()
         if self._stt is not None:
@@ -129,8 +181,32 @@ class CallSession:
         gen = self.generation
         self.speak_task = asyncio.create_task(self._speak(result.tts, gen))
 
+    async def _maybe_filler(self, turn_gen: int) -> None:
+        await asyncio.sleep(FILLER_AFTER)
+        if self.generation != turn_gen or self.closed:
+            return
+        line = filler_line(self.brain.language)
+        await self.transport.send_json(
+            {"type": "filler", "text": line, "language": self.brain.language}
+        )
+        if self.generation != turn_gen or self.closed:
+            return
+        self.speak_task = asyncio.create_task(self._speak(line, turn_gen))
+        await self.speak_task
+
+    async def _wait_quiet(self, timeout: float) -> None:
+        await asyncio.sleep(0.05)
+        if self.speaking or (self.speak_task is not None and not self.speak_task.done()):
+            self._spoke.clear()
+            try:
+                await asyncio.wait_for(self._spoke.wait(), timeout)
+            except asyncio.TimeoutError:
+                pass
+        await asyncio.sleep(0.4)
+
     async def _speak(self, text: str, generation: int) -> None:
         self.speaking = True
+        self._spoke.clear()
         try:
             await self.transport.send_json({"type": "status", "phase": "speaking", "turnId": generation})
             if not settings.gnani_on:
@@ -142,6 +218,7 @@ class CallSession:
                         "audio": "browser",
                         "turnId": generation,
                         "browserLang": BROWSER_LANG.get(self.brain.language, "hi-IN"),
+                        "voice": settings.gnani_tts_voice,
                     }
                 )
                 return
@@ -153,11 +230,15 @@ class CallSession:
                     "turnId": generation,
                 }
             )
+            pieces = split_spoken(strip_tags(text)) or [text]
             try:
-                async for chunk in synthesize(text, self.brain.language):
+                for piece in pieces:
                     if generation != self.generation or self.closed:
                         return
-                    await self.transport.send_pcm(chunk)
+                    async for chunk in synthesize(piece, self.brain.language):
+                        if generation != self.generation or self.closed:
+                            return
+                        await self.transport.send_pcm(chunk)
             except Exception as exc:
                 if generation != self.generation or self.closed:
                     return
@@ -199,8 +280,10 @@ class CallSession:
             except asyncio.CancelledError:
                 await stream.close()
                 raise
-            except Exception as exc:
-                await self.transport.send_json({"type": "error", "message": f"Gnani STT: {str(exc)[:180]}"})
+            except Exception:
+                await self.transport.send_json(
+                    {"type": "error", "recoverable": True, "message": recover_message()}
+                )
                 await asyncio.sleep(1)
             finally:
                 await stream.close()

@@ -59,8 +59,9 @@ const malayalam = Noto_Sans_Malayalam({
 });
 
 export const metadata: Metadata = {
-  title: "JanVaani",
-  description: "A voice call that fills welfare-scheme forms and prints a CSC Ready Slip. Speech by Gnani.",
+  title: "JanVaani — speak, match, leave with a slip",
+  description:
+    "Speak in your language, get matched to welfare schemes, and leave with a ready-to-submit slip. Powered by Gnani.ai.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

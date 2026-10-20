@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
@@ -135,6 +136,11 @@ async def ws_call(ws: WebSocket) -> None:
                 kind = data.get("type")
                 if kind == "start":
                     await session.start(data.get("language") or "auto")
+                elif kind == "demo":
+                    if session._demo_task is None or session._demo_task.done():
+                        session._demo_task = asyncio.create_task(
+                            session.play_demo(data.get("language") or "hi")
+                        )
                 elif kind == "utterance":
                     await session.on_text(data.get("text") or "", "text")
                 elif kind == "barge_in":
