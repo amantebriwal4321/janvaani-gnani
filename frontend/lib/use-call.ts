@@ -56,7 +56,14 @@ function apiBase() {
   const configured = process.env.NEXT_PUBLIC_API_BASE;
   if (configured) return configured.replace(/\/$/, "");
   if (typeof window === "undefined") return "http://127.0.0.1:8766";
-  return `${window.location.protocol}//${window.location.hostname}:8766`;
+  const host = window.location.hostname;
+  const local =
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.endsWith(".local") ||
+    /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
+  if (local) return `${window.location.protocol}//${host}:8766`;
+  return window.location.origin;
 }
 
 function makePlayer(ctx: AudioContext): Player {

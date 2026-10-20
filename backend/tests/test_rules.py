@@ -13,7 +13,7 @@ from app.llm import coerce_patch
 from app.main import app
 from app.models import Profile
 from app.schemes import CATALOG, match_all
-from app.slip import build_pdf
+from app.slip import build_pdf, slip_from_client
 from app.telephony import exotel_inbound_pcm, twilio_inbound_pcm
 import app.telephony as telephony
 
@@ -244,6 +244,20 @@ def test_mock_call_socket_end_to_end(monkeypatch):
         share = client.get(f"/api/sessions/{session_id}/share.txt")
         assert "PM-KISAN" in share.text
         assert "123412341234" not in share.text
+
+
+def test_posted_slip_prints_without_the_call_and_drops_id_numbers():
+    brain = Brain()
+    snap = brain.snapshot()
+    snap["rows"] = [{"label": "Note", "value": "123412341234", "heard": "said it"}]
+    cleaned = slip_from_client(snap)
+    assert "123412341234" not in json.dumps(cleaned)
+    with TestClient(app) as client:
+        response = client.post("/api/slip", json=snap)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.content.startswith(b"%PDF")
+    assert b"123412341234" not in response.content
 
 
 def _until(ws, predicate, limit=30):

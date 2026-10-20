@@ -31,6 +31,7 @@ export function Desk() {
   const [language, setLanguage] = useState("auto");
   const [draft, setDraft] = useState("");
   const [showOthers, setShowOthers] = useState(false);
+  const [slipError, setSlipError] = useState<string | null>(null);
   const call = useCall(language);
   const inCall = call.phase === "connecting" || call.phase === "listening" || call.phase === "speaking";
   const state = call.callState;
@@ -319,7 +320,23 @@ export function Desk() {
                   disabled={!state}
                   onClick={() => {
                     if (!state) return;
-                    window.open(`${call.apiBase}/api/sessions/${state.session_id}/slip.pdf`, "_blank");
+                    setSlipError(null);
+                    void fetch(`${call.apiBase}/api/slip`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(state),
+                    })
+                      .then(async (response) => {
+                        if (!response.ok) throw new Error("The slip could not be printed.");
+                        const blob = await response.blob();
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement("a");
+                        link.href = url;
+                        link.download = `${state.ref || "janvaani"}.pdf`;
+                        link.click();
+                        URL.revokeObjectURL(url);
+                      })
+                      .catch(() => setSlipError("The slip could not be printed. Try the call again."));
                   }}
                 >
                   Download PDF
@@ -331,6 +348,7 @@ export function Desk() {
                   Print
                 </Button>
               </div>
+              {slipError ? <p className="text-sm text-[#9d2c2c]">{slipError}</p> : null}
               {state?.share_text ? (
                 <pre className="whitespace-pre-wrap rounded-xl bg-muted p-4 text-sm leading-relaxed">{state.share_text}</pre>
               ) : null}

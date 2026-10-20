@@ -12,7 +12,7 @@ from app.config import settings
 from app.languages import BIAS_WORDS
 from app.schemes import CATALOG
 from app.session import SESSIONS, CallSession
-from app.slip import build_pdf
+from app.slip import build_pdf, render_pdf, slip_from_client
 from app.telephony import ExotelTransport, TwilioTransport, WebTransport, exotel_inbound_pcm, exotel_sample_rate, twilio_inbound_pcm
 
 app = FastAPI(title="JanVaani", version="2.0.0")
@@ -54,6 +54,21 @@ def slip_pdf(session_id: str) -> Response:
         raise HTTPException(404, "No slip for that call.")
     pdf = build_pdf(session.brain)
     filename = f"{session.brain.ref}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/slip")
+async def slip_download(body: dict) -> Response:
+    """PDF from the snapshot the browser already shows. No session lookup."""
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Expected the slip from this call.")
+    snap = slip_from_client(body)
+    pdf = render_pdf(snap)
+    filename = f"{snap['ref']}.pdf"
     return Response(
         content=pdf,
         media_type="application/pdf",

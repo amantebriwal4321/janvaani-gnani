@@ -3,12 +3,63 @@
 from __future__ import annotations
 
 import io
+import re
 from datetime import date
 
 import qrcode
 from fpdf import FPDF
 
 from app.engine import Brain
+
+_LONG_NUMBER = re.compile(r"\d{10,}")
+
+
+def _clean(value: object) -> str:
+    return _LONG_NUMBER.sub("[number withheld]", str(value or ""))
+
+
+def slip_from_client(body: dict) -> dict:
+    """The desk already holds the slip. A later HTTP request may hit another instance."""
+    rows = []
+    for row in body.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            {
+                "label": _clean(row.get("label"))[:80],
+                "value": _clean(row.get("value"))[:160],
+                "heard": _clean(row.get("heard"))[:160],
+            }
+        )
+    matches = []
+    for item in body.get("matches") or []:
+        if not isinstance(item, dict):
+            continue
+        reasons = item.get("reasons") if isinstance(item.get("reasons"), list) else []
+        matches.append(
+            {
+                "status": _clean(item.get("status"))[:32],
+                "name": _clean(item.get("name"))[:120],
+                "authority": _clean(item.get("authority"))[:120],
+                "portal": _clean(item.get("portal"))[:160],
+                "reasons": [_clean(reason)[:240] for reason in reasons[:4]],
+            }
+        )
+    documents = [_clean(item)[:160] for item in (body.get("documents") or []) if isinstance(item, str)]
+    fixes = [_clean(item)[:240] for item in (body.get("fix_first") or []) if isinstance(item, str)]
+    level = body.get("slip")
+    if level not in ("ready", "draft", "early"):
+        level = "draft"
+    return {
+        "ref": _clean(body.get("ref") or "JV-DRAFT")[:32],
+        "slip": level,
+        "share_text": _clean(body.get("share_text"))[:700],
+        "rows": rows[:40],
+        "matches": matches[:30],
+        "documents": documents[:40],
+        "fix_first": fixes[:8],
+        "csc": _clean(body.get("csc"))[:600],
+    }
 
 
 def _qr_png(payload: str) -> io.BytesIO:
@@ -26,7 +77,10 @@ def _pdf_text(value: str) -> str:
 
 
 def build_pdf(brain: Brain) -> bytes:
-    snap = brain.snapshot()
+    return render_pdf(brain.snapshot())
+
+
+def render_pdf(snap: dict) -> bytes:
     pdf = FPDF(format="A4", unit="mm")
     pdf.set_auto_page_break(auto=True, margin=16)
     pdf.set_left_margin(12)
