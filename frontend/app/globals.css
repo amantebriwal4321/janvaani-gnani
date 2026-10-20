@@ -153,7 +153,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ring-live, .orb-ring, .orb-core, .orb-bars i { animation: none; }
+  .ring-live, .orb-ring, .orb-face, .orb-bars i { animation: none; }
 }
 
 .cta {
@@ -206,13 +206,25 @@ body {
   color: #f4fff8;
 }
 
-.orb-wrap {
+.orb-hit {
   --level: 0.2;
   position: relative;
   display: grid;
   place-items: center;
   width: 15.5rem;
   height: 15.5rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: white;
+  cursor: pointer;
+}
+
+.orb-ring,
+.orb-face,
+.orb-bars,
+.orb-label {
+  pointer-events: none;
 }
 
 .orb-ring {
@@ -223,20 +235,20 @@ body {
   opacity: 0;
 }
 
-.orb-wrap[data-phase="listening"] .orb-ring,
-.orb-wrap[data-phase="speaking"] .orb-ring,
-.orb-wrap[data-phase="connecting"] .orb-ring {
+.orb-hit[data-phase="listening"] .orb-ring,
+.orb-hit[data-phase="speaking"] .orb-ring,
+.orb-hit[data-phase="connecting"] .orb-ring {
   animation: orb-pulse 2.1s ease-out infinite;
 }
 
-.orb-wrap[data-phase="speaking"] .orb-ring {
+.orb-hit[data-phase="speaking"] .orb-ring {
   border-color: rgba(240, 180, 110, 0.85);
   animation-duration: 1.05s;
 }
 
 .orb-ring.delay { animation-delay: 0.7s; }
 
-.orb-core {
+.orb-face {
   position: relative;
   z-index: 1;
   display: flex;
@@ -246,30 +258,27 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  border: 0;
   border-radius: 999px;
-  color: white;
-  cursor: pointer;
   background:
     radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.34), transparent 42%),
     radial-gradient(circle at 50% 62%, #1f8f5d, #0b3d2a 72%);
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
-.orb-wrap[data-phase="speaking"] .orb-core {
+.orb-hit[data-phase="speaking"] .orb-face {
   background:
     radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.35), transparent 42%),
     radial-gradient(circle at 50% 62%, #f0a35a, #b8611e 74%);
 }
 
-.orb-wrap[data-phase="thinking"] .orb-core {
+.orb-hit[data-phase="thinking"] .orb-face {
   background:
     radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.3), transparent 42%),
     radial-gradient(circle at 50% 62%, #e4d2ae, #8d7348 74%);
   animation: orb-breathe 1.3s ease-in-out infinite;
 }
 
-.orb-wrap[data-phase="listening"] .orb-core {
+.orb-hit[data-phase="listening"] .orb-face {
   transform: scale(calc(1 + var(--level) * 0.045));
 }
 
@@ -290,13 +299,13 @@ body {
   background: white;
 }
 
-.orb-wrap[data-phase="listening"] .orb-bars i {
+.orb-hit[data-phase="listening"] .orb-bars i {
   height: calc(5px + var(--level) * 16px);
   transition: height 90ms linear;
 }
 
-.orb-wrap[data-phase="speaking"] .orb-bars i,
-.orb-wrap[data-phase="thinking"] .orb-bars i {
+.orb-hit[data-phase="speaking"] .orb-bars i,
+.orb-hit[data-phase="thinking"] .orb-bars i {
   animation: orb-bar 0.85s ease-in-out infinite;
 }
 
@@ -321,9 +330,26 @@ body {
 }
 
 @media (max-width: 640px) {
-  .orb-wrap { width: 13rem; height: 13rem; }
-  .orb-core { width: 8rem; height: 8rem; }
+  .orb-hit { width: 13rem; height: 13rem; }
+  .orb-face { width: 8rem; height: 8rem; }
 }
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.status-live { background: #e7f6ee; color: #0e6b45; }
+.status-wait { background: #fff4df; color: #8a4e12; }
+.status-down { background: #ffd9cc; color: #6d2418; }
+.status-idle { background: #fffdf8; color: #3c342c; border: 1px solid #e4d7c4; }
 
 @media print {
   body * { visibility: hidden; }

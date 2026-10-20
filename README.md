@@ -113,7 +113,7 @@ The desk and the voice server ship separately. Pushes to `main` deploy the Next.
 
 Docker instead of the Blueprint: **New → Web Service**, environment **Docker**, root directory `backend`, Dockerfile `backend/Dockerfile`. Set the same env vars. Render injects `PORT`.
 
-The free instance sleeps after idle time. The first request wakes it, which can take about a minute; a call needs the service awake. WebSockets are supported on this web service. Do not run the API as a background worker.
+The free instance sleeps after idle time. The desk pings `GET /api/health` as soon as the page loads and shows **Waking up the line…** with a progress bar until that check returns. The first request can take about half a minute; a call connects once the service is awake. WebSockets are supported on this web service. Do not run the API as a background worker.
 
 ### 2. Vercel (Next.js desk)
 

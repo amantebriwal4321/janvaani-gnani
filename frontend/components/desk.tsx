@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Landing } from "@/components/landing";
 import { VoiceOrb } from "@/components/voice-orb";
 import { Button } from "@/components/ui/button";
+import { connectionLabel } from "@/lib/line-status";
 import { LANGUAGES, PHRASES } from "@/lib/phrases";
 import { useCall, type SchemeMatch } from "@/lib/use-call";
 
@@ -45,7 +46,7 @@ const FORM = [
 
 const PHASE_LINE: Record<string, string> = {
   idle: "Tap the orb, or play the demo. Talk as you would at a CSC counter.",
-  connecting: "Opening the line…",
+  connecting: "Opening the line. The server may still be waking.",
   listening: "Listening. Speak, or tap a phrase.",
   thinking: "Writing that down…",
   speaking: "JanVaani is speaking. Talk over her to interrupt.",
@@ -64,6 +65,17 @@ export function Desk() {
   const seen = useRef(new Map<string, string>());
   const transcriptEnd = useRef<HTMLDivElement>(null);
   const inCall = call.phase === "connecting" || call.phase === "listening" || call.phase === "thinking" || call.phase === "speaking";
+  const established = call.phase === "listening" || call.phase === "thinking" || call.phase === "speaking";
+  const statusLabel = connectionLabel({ phase: call.phase, demo: call.demo, line: call.line });
+  const statusTone =
+    statusLabel === "Live" || statusLabel === "Demo mode"
+      ? "status-live"
+      : statusLabel === "Line is down" || statusLabel === "Line dropped"
+        ? "status-down"
+        : statusLabel === "Ready"
+          ? "status-idle"
+          : "status-wait";
+  const textFallback = call.mic === "denied" || call.mic === "missing";
   const state = call.callState;
   const langLabel = LANGUAGES.find((item) => item.id === (state?.language || language))?.label ?? "Auto";
 
@@ -98,9 +110,10 @@ export function Desk() {
   }
 
   function begin(demo: boolean) {
+    // Start the call in this tap, before scrolling. getUserMedia has to run
+    // before the gesture ends, or the browser never asks for the microphone.
+    if (!(established && !demo)) void call.start({ demo });
     document.getElementById("desk")?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
-    if (inCall && !demo) return;
-    void call.start({ demo });
   }
 
   function onOrb() {
@@ -111,21 +124,54 @@ export function Desk() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b border-[#e4d7c4]/80 bg-[#f6f1e7]/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-[#0e6b45]">जनवाणी</p>
             <p className="font-display truncate text-2xl leading-none text-[#1a1612]">JanVaani</p>
           </div>
-          <p className="hidden text-sm font-semibold text-[#0e6b45] sm:block">Powered by Gnani.ai</p>
-          <button type="button" className="cta cta-small" onClick={() => (inCall ? document.getElementById("desk")?.scrollIntoView({ behavior: "smooth" }) : begin(false))}>
-            {inCall ? "On the line" : "Start talking"}
-          </button>
+          <p className="hidden text-sm font-semibold text-[#0e6b45] md:block">Powered by Gnani.ai</p>
+          <div className="flex items-center gap-2">
+            <span className={`status-pill ${statusTone}`} role="status">
+              {statusLabel}
+            </span>
+            <button type="button" className="cta cta-small" onClick={() => begin(false)}>
+              Start talking
+            </button>
+          </div>
         </div>
       </header>
 
       <div className="bg-[#9d2c2c] px-4 py-2 text-center text-sm text-white">
         Practice data only. Do not say a real Aadhaar, PAN, or phone number.
       </div>
+
+      {call.line !== "ready" ? (
+        <div className="border-b border-[#f0ddb4] bg-[#fff4df] px-4 py-3">
+          <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[#8a4e12]">
+                {call.line === "down" ? "Still waking the line…" : "Waking up the line…"}
+              </p>
+              <p className="mt-0.5 text-sm leading-relaxed text-[#5c5146]">
+                The voice server sleeps when nobody is calling. This page is waking it. Start talking still asks for the microphone, and the call connects when the line answers.
+              </p>
+            </div>
+            <div className="w-full sm:w-48 sm:shrink-0">
+              <div
+                role="progressbar"
+                aria-label="Waking up the line"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={call.wakeProgress}
+                className="h-2 overflow-hidden rounded-full bg-white"
+              >
+                <div className="h-full rounded-full bg-[#e08a2c]" style={{ width: `${call.wakeProgress}%` }} />
+              </div>
+              <p className="mt-1 text-right text-xs font-semibold text-[#8a4e12]">{call.wakeProgress}%</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <Landing
         language={language}
@@ -195,8 +241,29 @@ export function Desk() {
             {state?.pending ? (
               <p className="mt-3 text-sm text-[#e7c9a4]">Asking: {PENDING[state.pending] || state.pending}</p>
             ) : null}
-            {call.micNote ? <p className="mt-3 text-sm text-[#f0c7a2]">{call.micNote}</p> : null}
-            {call.error ? <p className="mt-3 text-sm text-[#ffb4a8]">{call.error}</p> : null}
+            {call.mic === "denied" ? (
+              <div className="mt-3 whitespace-normal break-words rounded-2xl bg-white/10 p-4 text-sm leading-relaxed text-[#f6f1e7]">
+                <p>
+                  The browser blocked the microphone. Allow the mic for this site in the address bar, then tap Try the microphone again. You can also type below, or tap a phrase. JanVaani still answers.
+                </p>
+                <button
+                  type="button"
+                  className="mt-3 h-11 rounded-full bg-[#f6f1e7] px-4 text-sm font-semibold text-[#10241c]"
+                  onClick={() => void call.enableMic()}
+                >
+                  Try the microphone again
+                </button>
+              </div>
+            ) : null}
+            {call.mic === "missing" ? (
+              <div className="mt-3 whitespace-normal break-words rounded-2xl bg-white/10 p-4 text-sm leading-relaxed text-[#f6f1e7]">
+                <p>This browser has no microphone to use. Type what you would say, or tap a phrase. JanVaani still answers.</p>
+              </div>
+            ) : null}
+            {call.mic === "skipped" && call.micNote ? (
+              <p className="mt-3 whitespace-normal break-words text-sm leading-relaxed text-[#f0c7a2]">{call.micNote}</p>
+            ) : null}
+            {call.error ? <p className="mt-3 whitespace-normal break-words text-sm leading-relaxed text-[#ffb4a8]">{call.error}</p> : null}
 
             <div className="mt-4 flex flex-wrap gap-2">
               {PHRASES.map((phrase) => (
@@ -225,7 +292,7 @@ export function Desk() {
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 disabled={!inCall}
-                placeholder="Or type what you would say"
+                placeholder={textFallback ? "Type here — the microphone is off" : "Or type what you would say"}
                 className="h-12 min-w-0 flex-1 rounded-full border border-white/15 bg-white/5 px-4 text-base text-white outline-none placeholder:text-white/40 focus-visible:ring-2 focus-visible:ring-[#e7c9a4] disabled:opacity-40"
                 aria-label="Type what you would say"
               />

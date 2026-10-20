@@ -24,15 +24,18 @@ export function VoiceOrb({
   const live = phase === "listening" || phase === "speaking" || phase === "thinking" || phase === "connecting";
   const energy = Math.max(0.12, Math.min(1, level));
   return (
-    <div
-      className="orb-wrap"
+    <button
+      type="button"
+      className="orb-hit"
       data-phase={phase}
       style={{ ["--level" as string]: String(energy) }}
+      onClick={onPress}
+      aria-pressed={live}
     >
-      <span className="orb-ring" />
-      <span className="orb-ring delay" />
-      <button type="button" className="orb-core" onClick={onPress} aria-pressed={live}>
-        <span className="orb-bars" aria-hidden="true">
+      <span className="orb-ring" aria-hidden="true" />
+      <span className="orb-ring delay" aria-hidden="true" />
+      <span className="orb-face" aria-hidden="true">
+        <span className="orb-bars">
           <i />
           <i />
           <i />
@@ -40,7 +43,7 @@ export function VoiceOrb({
           <i />
         </span>
         <span className="orb-label">{LABEL[phase]}</span>
-      </button>
-    </div>
+      </span>
+    </button>
   );
 }

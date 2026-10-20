@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBase, wsBase } from "./endpoints";
+import { classifyMic, wakePercent, type LineState } from "./line-status";
 import { BROWSER_LANG } from "./phrases";
 
 export type Phase = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "ended" | "error";
+export type MicAccess = "unknown" | "live" | "denied" | "missing" | "skipped";
 
 export type ProfileRow = { field: string; label: string; value: string; heard?: string };
 export type SchemeMatch = {
@@ -104,6 +106,22 @@ function makePlayer(ctx: AudioContext): Player {
   };
 }
 
+function audioContext(): AudioContext {
+  const webkit = window as Window & { webkitAudioContext?: typeof AudioContext };
+  const Ctx = window.AudioContext || webkit.webkitAudioContext;
+  return new Ctx();
+}
+
+function requestMic(): Promise<MediaStream> {
+  const devices = navigator.mediaDevices;
+  if (!devices?.getUserMedia) {
+    return Promise.reject(Object.assign(new Error("This browser has no microphone."), { name: "NotSupportedError" }));
+  }
+  return devices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+  });
+}
+
 function pickVoice(lang: string): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis?.getVoices?.() ?? [];
   const prefix = (lang || "hi-IN").slice(0, 2).toLowerCase();
@@ -121,6 +139,9 @@ export function useCall(language: string) {
   const [copied, setCopied] = useState(false);
   const [level, setLevel] = useState(0.15);
   const [demo, setDemo] = useState(false);
+  const [line, setLine] = useState<LineState>("waking");
+  const [wakeProgress, setWakeProgress] = useState(8);
+  const [mic, setMic] = useState<MicAccess>("unknown");
 
   const wsRef = useRef<WebSocket | null>(null);
   const playerRef = useRef<Player | null>(null);
@@ -133,6 +154,9 @@ export function useCall(language: string) {
   const captionId = useRef(1);
   const thinkStamp = useRef(0);
   const meterAt = useRef(0);
+  const workletReady = useRef(false);
+  const queued = useRef<string[]>([]);
+  const callGen = useRef(0);
   const languageRef = useRef(language);
   languageRef.current = language;
 
@@ -143,16 +167,41 @@ export function useCall(language: string) {
 
   useEffect(() => {
     let gone = false;
-    fetch(`${apiBase()}/api/health`)
-      .then((response) => response.json())
-      .then((body) => {
-        if (!gone) setHealth(body);
-      })
-      .catch(() => {
-        /* The call button reports a down line. The landing still explains the product. */
-      });
+    const started = Date.now();
+    let awake = false;
+    const tick = window.setInterval(() => {
+      if (gone || awake) return;
+      setWakeProgress(wakePercent(Date.now() - started));
+    }, 400);
+
+    async function wake() {
+      while (!gone) {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 8000);
+        try {
+          const response = await fetch(`${apiBase()}/api/health`, { cache: "no-store", signal: controller.signal });
+          if (!response.ok) throw new Error("down");
+          const body = (await response.json()) as Health;
+          if (gone) return;
+          setHealth(body);
+          awake = true;
+          setLine("ready");
+          setWakeProgress(100);
+          return;
+        } catch {
+          if (gone) return;
+          if (Date.now() - started > 45000) setLine("down");
+          await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        } finally {
+          window.clearTimeout(timer);
+        }
+      }
+    }
+
+    void wake();
     return () => {
       gone = true;
+      window.clearInterval(tick);
     };
   }, []);
 
@@ -228,41 +277,134 @@ export function useCall(language: string) {
 
   const sendText = useCallback(
     (text: string, nextLanguage?: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
       const socket = wsRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) return;
       if (nextLanguage && nextLanguage !== "auto") {
-        socket.send(JSON.stringify({ type: "set_language", language: nextLanguage }));
+        languageRef.current = nextLanguage;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "set_language", language: nextLanguage }));
+        }
+      }
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        if (phaseRef.current === "connecting") queued.current.push(trimmed);
+        return;
       }
       armThinking();
-      socket.send(JSON.stringify({ type: "utterance", text }));
+      socket.send(JSON.stringify({ type: "utterance", text: trimmed }));
     },
     [armThinking],
   );
 
+  const attachStream = useCallback(
+    async (ctx: AudioContext, media: MediaStream, ticket: number) => {
+      if (callGen.current !== ticket) {
+        media.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = media;
+      if (ctx.state === "closed") return;
+      if (!workletReady.current) {
+        await ctx.audioWorklet.addModule("/pcm-worklet.js");
+        workletReady.current = true;
+      }
+      const closed = (ctx.state as AudioContextState) === "closed";
+      if (callGen.current !== ticket || closed) {
+        media.getTracks().forEach((track) => track.stop());
+        if (streamRef.current === media) streamRef.current = null;
+        return;
+      }
+      const source = ctx.createMediaStreamSource(media);
+      const worklet = new AudioWorkletNode(ctx, "pcm-downsample");
+      worklet.port.onmessage = (event) => {
+        const frame = event.data;
+        if (!frame || frame.type !== "frame") return;
+        const socket = wsRef.current;
+        if (socket && socket.readyState === WebSocket.OPEN) socket.send(frame.pcm.buffer);
+        const now = Date.now();
+        if (now - meterAt.current > 80) {
+          meterAt.current = now;
+          setLevel(Math.max(0.12, Math.min(1, frame.rms * 5)));
+        }
+        const speaking = phaseRef.current === "speaking" && now - speakStarted.current > 420;
+        if (speaking && frame.rms > 0.11) {
+          hot.current += 1;
+          if (hot.current >= 4) barge();
+        } else if (frame.rms < 0.06) {
+          hot.current = 0;
+        }
+      };
+      source.connect(worklet);
+    },
+    [barge],
+  );
+
+  const enableMic = useCallback(async () => {
+    const ticket = ++callGen.current;
+    const current = ctxRef.current;
+    const ctx = current && current.state !== "closed" ? current : audioContext();
+    if (ctx !== current) {
+      ctxRef.current = ctx;
+      workletReady.current = false;
+      playerRef.current = makePlayer(ctx);
+    }
+    // Both calls stay inside the tap, before the first await.
+    const resumePromise = ctx.resume();
+    const micPromise = requestMic();
+    void resumePromise.catch(() => undefined);
+    try {
+      const media = await micPromise;
+      if (callGen.current !== ticket) {
+        media.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      await attachStream(ctx, media, ticket);
+      if (callGen.current !== ticket) return;
+      setMic("live");
+      setMicNote(null);
+    } catch (err) {
+      if (callGen.current !== ticket) return;
+      setMic(classifyMic(err));
+    }
+  }, [attachStream]);
+
   const start = useCallback(
     async (options?: { demo?: boolean }) => {
       const asDemo = Boolean(options?.demo);
-      if (typeof window !== "undefined" && window.speechSynthesis) {
-        const unlock = new SpeechSynthesisUtterance(" ");
-        unlock.volume = 0;
-        window.speechSynthesis.speak(unlock);
-      }
-      setError(null);
-      setMicNote(null);
-      setCaptions([]);
-      setCopied(false);
-      setDemo(asDemo);
-      setLevel(0.15);
+      const ticket = ++callGen.current;
+      // Stop the previous call first, still inside the tap, so the unlock
+      // utterance below is not cancelled.
       stopAudio();
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       wsRef.current?.close();
-      void ctxRef.current?.close();
 
-      const ctx = new AudioContext();
+      // Keep this block free of await. Mobile browsers only treat getUserMedia
+      // and AudioContext.resume as a user gesture when they start in the tap.
+      const previous = ctxRef.current;
+      const ctx = audioContext();
       ctxRef.current = ctx;
-      void ctx.resume();
+      workletReady.current = false;
+      const resumePromise = ctx.resume();
       playerRef.current = makePlayer(ctx);
+      const micPromise = asDemo ? null : requestMic();
+      try {
+        const unlock = new SpeechSynthesisUtterance(" ");
+        unlock.volume = 0;
+        window.speechSynthesis?.speak(unlock);
+      } catch {
+        /* The device voice is optional. The call still runs. */
+      }
+      if (previous && previous !== ctx && previous.state !== "closed") void previous.close();
+
+      setError(null);
+      setMicNote(null);
+      setMic(asDemo ? "skipped" : "unknown");
+      setCaptions([]);
+      setCopied(false);
+      setDemo(asDemo);
+      setLevel(0.15);
       go("connecting");
 
       const socket = new WebSocket(`${wsBase()}/ws/call`);
@@ -355,54 +497,47 @@ export function useCall(language: string) {
           socket.addEventListener("error", () => reject(new Error("socket")), { once: true });
         });
       } catch {
-        setError("The call could not connect. Check that the voice server is running.");
+        setError("The call could not connect. The line may still be waking up. Tap Start talking again.");
         go("error");
+        if (micPromise) {
+          void micPromise.then((media) => media.getTracks().forEach((track) => track.stop())).catch(() => undefined);
+        }
         return;
       }
 
+      void resumePromise.catch(() => undefined);
       if (socket.readyState !== WebSocket.OPEN) {
         go("error");
         return;
       }
       const chosen = languageRef.current;
       if (asDemo) {
+        queued.current = [];
         socket.send(JSON.stringify({ type: "demo", language: chosen === "auto" ? "hi" : chosen }));
-        setMicNote("Demo mode. A practice household speaks for you, so the microphone stays off.");
+        setMicNote("Demo mode uses a practice household, so the microphone stays off. You can still type a line.");
         return;
       }
       socket.send(JSON.stringify({ type: "start", language: chosen }));
+      const pending = queued.current.splice(0);
+      for (const text of pending) socket.send(JSON.stringify({ type: "utterance", text }));
 
+      if (!micPromise) return;
       try {
-        const media = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
-        });
-        streamRef.current = media;
-        await ctx.audioWorklet.addModule("/pcm-worklet.js");
-        const source = ctx.createMediaStreamSource(media);
-        const worklet = new AudioWorkletNode(ctx, "pcm-downsample");
-        worklet.port.onmessage = (event) => {
-          const frame = event.data;
-          if (!frame || frame.type !== "frame") return;
-          if (socket.readyState === WebSocket.OPEN) socket.send(frame.pcm.buffer);
-          const now = Date.now();
-          if (now - meterAt.current > 80) {
-            meterAt.current = now;
-            setLevel(Math.max(0.12, Math.min(1, frame.rms * 5)));
-          }
-          const speaking = phaseRef.current === "speaking" && now - speakStarted.current > 420;
-          if (speaking && frame.rms > 0.11) {
-            hot.current += 1;
-            if (hot.current >= 4) barge();
-          } else if (frame.rms < 0.06) {
-            hot.current = 0;
-          }
-        };
-        source.connect(worklet);
-      } catch {
-        setMicNote("Microphone is off. Tap a phrase, or type, and the line still answers.");
+        const media = await micPromise;
+        if (wsRef.current !== socket || callGen.current !== ticket) {
+          media.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        await attachStream(ctx, media, ticket);
+        if (callGen.current !== ticket) return;
+        setMic("live");
+        setMicNote(null);
+      } catch (err) {
+        if (callGen.current !== ticket) return;
+        setMic(classifyMic(err));
       }
     },
-    [armThinking, barge, finishSpeak, go, speakOnDevice, stopAudio],
+    [armThinking, attachStream, finishSpeak, go, speakOnDevice, stopAudio],
   );
 
   useEffect(() => {
@@ -437,8 +572,12 @@ export function useCall(language: string) {
     copied,
     level,
     demo,
+    line,
+    wakeProgress,
+    mic,
     apiBase: apiBase(),
     start,
+    enableMic,
     hangup,
     barge,
     sendText,
