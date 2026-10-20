@@ -8,7 +8,7 @@ from app.audio import pcm16_rms
 from app.config import settings
 from app.dialogue import strip_tags
 from app.engine import Brain, echo_of_assistant
-from app.gnani import STTStream, synthesize
+from app.gnani import STTEvent, STTStream, stt_code, synthesize
 from app.languages import BROWSER_LANG
 from app.llm import LLMClient
 
@@ -61,6 +61,13 @@ class CallSession:
             llm = LLMClient() if settings.llm_on else None
             result = await self.brain.utterance(text, llm)
             await self._publish(result, user_text=text, source=source)
+
+    async def on_stt_event(self, event: STTEvent) -> None:
+        if event.type == "speech_start":
+            await self.barge()
+            return
+        if event.type == "transcript" and event.is_final and event.text:
+            await self.on_text(event.text, "stt")
 
     async def on_pcm(self, pcm: bytes) -> None:
         if self.closed or not pcm:
@@ -177,16 +184,17 @@ class CallSession:
 
     async def _listen(self) -> None:
         while not self.closed:
-            stream = STTStream(self.brain.language)
+            stream = STTStream(self.brain.language, locked=self.brain.language_locked)
             self._stt = stream
             try:
                 await stream.connect()
                 await self.transport.send_json(
                     {"type": "stt", "ready": True, "lang": stream.lang_code, "sampleRate": 8000}
                 )
-                async for text in stream.transcripts():
-                    await self.on_text(text, "stt")
-                    if self.brain.language != stream.language or self.closed:
+                async for event in stream.events():
+                    await self.on_stt_event(event)
+                    code = stt_code(self.brain.language, locked=self.brain.language_locked)
+                    if code != stream.lang_code or self.closed:
                         break
             except asyncio.CancelledError:
                 await stream.close()

@@ -292,7 +292,9 @@ class Brain:
             parts.append(say("invite", lang))
 
         display = strip_tags(" ".join(part for part in parts if part))
-        tts = " <pauses> ".join(part for part in parts if part)
+        # Timbre accepts <pauses> but does not speak it, and Prisma splits the
+        # utterance on that gap. Speak the sentences as one line.
+        tts = " ".join(part for part in parts if part)
         return display, tts
 
 

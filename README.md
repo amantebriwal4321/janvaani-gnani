@@ -59,7 +59,7 @@ FastAPI CallSession
         ├─ Extractor    rules first, digits and script, no ID numbers
         ├─ LLM gap-fill optional, never overwrites a rule, never decides eligibility
         ├─ Scheme rules 19 schemes
-        └─ Timbre TTS   wss://api.vachana.ai/api/v1/tts      (device voice in mock)
+        └─ Timbre TTS   POST /api/v1/tts/inference          (device voice in mock)
 ```
 
 The browser downsamples the microphone to 8 kHz, 512-sample frames, the same size a phone line would send. Two adapters sit on the same `CallSession`:
@@ -69,7 +69,9 @@ The browser downsamples the microphone to 8 kHz, 512-sample frames, the same siz
 
 Neither adapter needs a paid account to run the desk. A live number is not wired; the web softphone is the demo path. Caller IDs on a start event are discarded.
 
-Language is chosen with the chips, or left on Auto. Auto greets in Hindi and switches from script (Kannada, Telugu, Tamil, Bengali, Malayalam, Devanagari) or from Hinglish markers. Prisma locks language per socket, so a switch reconnects STT. `hi-en` is sent because Timbre and this contest use it; if Prisma rejects it, the socket reconnects as `hi-IN`.
+Language is chosen with the chips, or left on Auto. Auto greets in Hindi and switches from script (Kannada, Telugu, Tamil, Bengali, Malayalam, Devanagari) or from Hinglish markers. Prisma STT takes BCP-47 codes only (`hi-IN`, `kn-IN`, and the rest). It rejects `hi-en`, so Hinglish and an unlocked auto call use `indic-auto` instead of reconnecting after a failure. A locked language uses its `-IN` code and the socket reconnects when that code changes. Timbre may still be asked for `hi-en` when the reply itself is Hinglish.
+
+The realtime socket sends `x-api-key-id`, `lang_code`, `x-sample-rate: 8000`, and `x-min-silence-ms: 400`. Audio goes up as 1,024-byte PCM frames, one every 64 ms. `speech_start` interrupts playback. A final `transcript` (`is_final`, `segment_index` from 1) is the caller's turn. Timbre's REST body is `voice`, `model`, `language`, and `audio_config` (`sample_rate`, `encoding`, `container`). The response is the audio itself. `container: mulaw` is raw 8 kHz G.711.
 
 The dialogue model is pluggable and optional. Set `LLM_BASE_URL` to an OpenAI-compatible `/v1` endpoint (self-hosted Evon, or any other chat model). It may only fill empty profile fields. `LLM_ENABLED=off` keeps the extractor alone.
 
@@ -87,7 +89,7 @@ Copy `.env.example` to `.env`.
 | `GNANI_BASE_URL` | Default `https://api.vachana.ai` |
 | `GNANI_TTS_MODEL` | `timbre-v3.0` |
 | `GNANI_TTS_VOICE` | `Shivani` |
-| `GNANI_TTS_SPEED` | `0.92` |
+| `GNANI_TTS_SPEED` | Kept for later. The verified Timbre body does not send speed. |
 | `LLM_BASE_URL` | OpenAI-compatible base, including `/v1` if the server expects it |
 | `LLM_API_KEY` | Bearer token for that endpoint |
 | `LLM_MODEL` | Default `evon` |
@@ -106,13 +108,19 @@ Run from `backend/`, or let pytest use `backend/pytest.ini` (`pythonpath = .` is
 cd backend && ../.venv/bin/python -m pytest -q
 ```
 
-The suite covers the Kolar, Mysuru, Nizamabad, and Nagpur households, the rule that an LLM patch cannot overwrite an extracted field, ID-number stripping, echo filtering, µ-law frames, and a full mock WebSocket call through to a PDF.
+The suite covers the Kolar, Mysuru, Nizamabad, and Nagpur households, the rule that an LLM patch cannot overwrite an extracted field, ID-number stripping, echo filtering, µ-law frames, the Gnani request shapes, and a full mock WebSocket call through to a PDF.
+
+Live speech, when a key is present:
+
+```bash
+cd backend && ../.venv/bin/python scripts/gnani_smoke.py
+```
+
+With no key the script prints a skip line and exits 0. With a key it speaks one Hindi line, transcribes it over REST and over the 8 kHz socket, and checks that a mulaw reply is raw audio.
 
 ## What still needs a live key or a phone account
 
-- Hearing a real microphone and hearing Timbre. The client code is complete; it has not been exercised against `api.vachana.ai`.
-- Whether Prisma accepts `hi-en` on the stream. The fallback to `hi-IN` is in the client.
-- Timbre audio tags such as `<pauses>` between sentences. They are sent; a live voice is the check.
+- A desk call with this process's `GNANI_API_KEY`. The request shapes match a live check from 20 October 2026; `indic-auto` itself was not in that check.
 - Evon gap-fill. Point `LLM_BASE_URL` at a self-hosted OpenAI-compatible endpoint.
 - A real Exotel or Twilio number. The adapters speak those media protocols; no account is configured.
 - Voice cloning. The Timbre endpoint exists; this app does not call it.

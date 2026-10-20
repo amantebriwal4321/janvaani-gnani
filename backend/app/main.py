@@ -92,8 +92,17 @@ async def tts_clip(body: dict) -> Response:
     text = str(body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "Missing text.")
-    audio = await synthesize_rest(text, str(body.get("language") or "hi"))
-    return Response(content=audio, media_type="audio/wav")
+    container = str(body.get("container") or "wav")
+    if container not in ("wav", "mulaw", "raw"):
+        container = "wav"
+    audio = await synthesize_rest(text, str(body.get("language") or "hi"), container)
+    if container == "mulaw":
+        media = "audio/basic"
+    elif container == "raw":
+        media = "application/octet-stream"
+    else:
+        media = "audio/wav"
+    return Response(content=audio, media_type=media)
 
 
 @app.websocket("/ws/call")
