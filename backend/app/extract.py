@@ -326,19 +326,162 @@ STATE_WORDS = {
 }
 
 OCCUPATIONS = (
-    ("street_vendor", ("street vendor", "thela", "thela lagata", "pheriwala", "hawker", "rehri", " फेरी")),
+    (
+        "street_vendor",
+        (
+            "street vendor",
+            "thela",
+            "thela lagata",
+            "pheriwala",
+            "hawker",
+            "rehri",
+            "dukaan",
+            "dukan",
+            "shop",
+            "दुकान",
+            "दूकान",
+            "ठेला",
+            "फेरी",
+            "रेहड़ी",
+            "ಅಂಗಡಿ",
+            "దుకాణం",
+            "கடை",
+            "দোকান",
+            "കട",
+        ),
+    ),
     (
         "artisan",
-        ("darzi", "tailor", "ದರ್ಜಿ", "దర్జీ", "தையல்", "carpenter", "badhai", "lohar", "kumhar", "mochi", "barber", "julaha", "weaver", "sonar", "goldsmith", "rajmistri", "blacksmith", "potter"),
+        (
+            "darzi",
+            "tailor",
+            "carpenter",
+            "badhai",
+            "lohar",
+            "kumhar",
+            "mochi",
+            "barber",
+            "julaha",
+            "weaver",
+            "sonar",
+            "goldsmith",
+            "rajmistri",
+            "blacksmith",
+            "potter",
+            "कारीगर",
+            "दर्जी",
+            "लोहार",
+            "कुम्हार",
+            "शिवण",
+            "ದರ್ಜಿ",
+            "దర్జీ",
+            "தையல்",
+            "দর্জি",
+            "തയ്യൽ",
+        ),
     ),
     (
         "farmer",
-        ("kisan", "farmer", "farm", "ugata", "ugate", "ugati", "kheti", "krishi", "rythu", "raithu", "raitu", "vivasayi", "shetkari", "chashi", "ರೈತ", "రైతు", "விவசாயி", "शेतकरी", "চাষি", "കർഷക"),
+        (
+            "kisan",
+            "kheti",
+            "khet",
+            "krishi",
+            "farming",
+            "farmer",
+            "farm",
+            "agriculture",
+            "ugata",
+            "ugate",
+            "ugati",
+            "rythu",
+            "raithu",
+            "raitu",
+            "vivasayi",
+            "shetkari",
+            "chashi",
+            "खेती",
+            "खेतीबाड़ी",
+            "खेत",
+            "किसान",
+            "कृषक",
+            "कृषि",
+            "शेती",
+            "शेतकरी",
+            "शेत",
+            "ರೈತ",
+            "ಕೃಷಿ",
+            "రైతు",
+            "వ్యవసాయం",
+            "సాగు",
+            "விவசாயம்",
+            "விவசாயி",
+            "உழவு",
+            "চাষ",
+            "চাষি",
+            "কৃষি",
+            "কৃষক",
+            "കൃഷി",
+            "കർഷകൻ",
+            "കർഷക",
+        ),
     ),
-    ("labourer", ("mazdoor", "majdoor", "mazdur", "labour", "labor", "coolie", "daily wage", "kooli")),
-    ("homemaker", ("homemaker", "housewife", "grihini")),
-    ("student", ("student", "padhai", "college")),
-    ("salaried", ("naukri", "salary", "office job", "private job", "government job")),
+    (
+        "labourer",
+        (
+            "mazdoori",
+            "mazdoor",
+            "majdoor",
+            "majdoori",
+            "mazdur",
+            "labourer",
+            "labour",
+            "laborer",
+            "labor",
+            "coolie",
+            "daily wage",
+            "wage work",
+            "kooli",
+            "dihadi",
+            "मजदूरी",
+            "मज़दूरी",
+            "मजदूर",
+            "मज़दूर",
+            "दिहाड़ी",
+            "मजुरी",
+            "मजूर",
+            "मजूरी",
+            "ಕೂಲಿ",
+            "కూలీ",
+            "కూలి",
+            "கூலி",
+            "মজুরি",
+            "মজুর",
+            "കൂലി",
+            "കൂലിപ്പണി",
+        ),
+    ),
+    ("homemaker", ("homemaker", "housewife", "grihini", "गृहिणी", "घरवाली", "ಮನೆಕೆಲಸ", "ఇంటి పని", "வீட்டு வேலை", "घरकाम", "গৃহিণী", "വീട്ടമ്മ")),
+    ("student", ("student", "padhai", "college", "विद्यार्थी", "छात्र", "पढ़ाई", "ವಿದ್ಯಾರ್ಥಿ", "విద్యార్థి", "மாணவர்", "ছাত্র", "വിദ്യാർത്ഥി")),
+    (
+        "salaried",
+        (
+            "naukri",
+            "salary",
+            "office job",
+            "private job",
+            "government job",
+            "नौकरी",
+            "वेतन",
+            "ನೌಕರಿ",
+            "ఉద్యోగం",
+            "జీతం",
+            "சம்பளம்",
+            "नोकरी",
+            "চাকরি",
+            "ശമ്പളം",
+        ),
+    ),
 )
 
 TRADES = (
@@ -354,22 +497,54 @@ TRADES = (
 )
 
 CROPS = (
-    ("tomato", ("tamatar", "tomato", "ಟೊಮೇಟೊ", "టమాట")),
-    ("wheat", ("gehun", "gehun", "wheat", "godhuma")),
-    ("rice", ("dhan", "rice", "paddy", "bhatta", "nellu")),
-    ("cotton", ("kapas", "cotton")),
-    ("ragi", ("ragi", "raagi")),
-    ("jowar", ("jowar", "sorghum")),
-    ("tur", ("tur dal", "tur")),
-    ("onion", ("pyaz", "onion", "ullagadda")),
-    ("chilli", ("mirchi", "chilli", "chili")),
-    ("maize", ("makka", "maize", "corn")),
-    ("sugarcane", ("ganna", "sugarcane")),
-    ("soyabean", ("soyabean", "soybean")),
+    ("tomato", ("tamatar", "tomato", "टमाटर", "ಟೊಮೇಟೊ", "టమాట", "தக்காளி", "টমেটো")),
+    ("wheat", ("gehun", "gehun", "wheat", "godhuma", "गेहूं", "गेहूँ", "गहू", "ಗೋಧಿ", "గోధుమ", "கோதுமை", "গম", "ഗോതമ്പ്")),
+    ("rice", ("dhan", "rice", "paddy", "bhatta", "nellu", "धान", "चावल", "भात", "ಭತ್ತ", "వరి", "நெல்", "ধান", "അരി")),
+    ("cotton", ("kapas", "cotton", "कपास", "ಕಾಪಾಸು", "పత్తి", "பருத்தி", "তুলো")),
+    ("ragi", ("ragi", "raagi", "रागी", "नाचनी", "রাগি")),
+    ("jowar", ("jowar", "sorghum", "ज्वार", "ज्वारी")),
+    ("tur", ("tur dal", "tur", "अरहर", "तूर")),
+    ("onion", ("pyaz", "onion", "ullagadda", "प्याज", "कांदा")),
+    ("chilli", ("mirchi", "chilli", "chili", "मिर्च", "मिर्ची")),
+    ("maize", ("makka", "maize", "corn", "मक्का", "मक्की")),
+    ("sugarcane", ("ganna", "sugarcane", "गन्ना", "ऊस")),
+    ("soyabean", ("soyabean", "soybean", "सोयाबीन")),
 )
 
-RURAL = ("gaon", "gaav", "village", "halli", "ಹಳ್ಳಿ", "గ్రామ", "கிராம", "গ্রাম", "ഗ്രാമ", "गाव", "ग्राम")
-URBAN = ("shehar", "shahar", "city", "urban", "nagarpalika")
+RURAL = (
+    "gaon",
+    "gaav",
+    "village",
+    "halli",
+    "ಹಳ್ಳಿ",
+    "గ్రామ",
+    "గ్రామం",
+    "கிராம",
+    "கிராமம்",
+    "গ্রাম",
+    "ഗ്രാമ",
+    "ഗ്രാമം",
+    "गाव",
+    "गाँव",
+    "गांव",
+    "ग्राम",
+)
+URBAN = (
+    "shehar",
+    "shahar",
+    "city",
+    "town",
+    "urban",
+    "nagarpalika",
+    "शहर",
+    "शहरी",
+    "ನಗರ",
+    "పట్టణం",
+    "నగరం",
+    "நகரம்",
+    "শহর",
+    "നഗരം",
+)
 
 WOMAN = (
     "aurat",
@@ -640,8 +815,53 @@ _CAN_DO = re.compile(
     r"কি\s*করতে\s*পার|কী\s*করতে\s*পার",
     re.I,
 )
-_YES = {"हाँ", "हां", "हा", "जी", "yes", "yeah", "yep", "haan", "han", "ha", "হ্যাঁ", "হ্যা", "আজ্ঞে"}
-_NO = {"नहीं", "नही", "ना", "no", "nahi", "nahin", "না", "নাহ"}
+_YES = {
+    "हाँ",
+    "हां",
+    "हा",
+    "जी",
+    "ठीक",
+    "सही",
+    "yes",
+    "yeah",
+    "yep",
+    "haan",
+    "han",
+    "ha",
+    "houdu",
+    "haudu",
+    "avunu",
+    "aama",
+    "aam",
+    "হ্যাঁ",
+    "হ্যা",
+    "আজ্ঞে",
+    "हो",
+    "होय",
+    "ಹೌದು",
+    "అవును",
+    "ஆம்",
+    "അതെ",
+}
+_NO = {
+    "नहीं",
+    "नही",
+    "ना",
+    "no",
+    "nahi",
+    "nahin",
+    "না",
+    "নাহ",
+    "नाही",
+    "इल्ला",
+    "इल्ल",
+    "ಇಲ್ಲ",
+    "కాదు",
+    "లేదు",
+    "இல்லை",
+    "ഇല്ല",
+    "नाही",
+}
 
 
 def asks_capability(text: str) -> bool:
@@ -649,7 +869,7 @@ def asks_capability(text: str) -> bool:
 
 
 def yes_no(text: str) -> bool | None:
-    token = (text or "").strip().strip(".!?।").strip()
+    token = strip_slot_punct(text)
     if not token or len(token.split()) > 3:
         return None
     if token in _YES or token.lower() in _YES:
@@ -661,6 +881,24 @@ def yes_no(text: str) -> bool | None:
 
 def normalize_digits(text: str) -> str:
     return text.translate(DIGIT_TABLE)
+
+
+# Keep a decimal point between digits. Every other mark is noise around a slot answer,
+# including the Hindi danda in "खेती।".
+_SLOT_PUNCT = re.compile(
+    r"(?<!\d)\.(?!\d)|[।॥॰!?？！,،؛;:：'\"“”‘’`´()\[\]{}<>…·•|/\\*_~@#%&+=^«»‐‑‒–—―]"
+)
+
+
+def _fold_nukta(text: str) -> str:
+    return text.replace("़", "").replace("়", "")
+
+
+def strip_slot_punct(text: str) -> str:
+    """Punctuation and extra space come off before any slot is matched."""
+    cleaned = (text or "").replace("\u00a0", " ").replace("\u200b", "").replace("\ufeff", "")
+    cleaned = _SLOT_PUNCT.sub(" ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _parse_number(token: str) -> float | None:
@@ -685,18 +923,20 @@ def _negated(text: str, start: int, end: int) -> bool:
 
 
 def _find_keyword(text: str, groups: tuple[tuple[str, tuple[str, ...]], ...]) -> tuple[str, str, int] | None:
+    hay = _fold_nukta(strip_slot_punct(text))
     best: tuple[str, str, int] | None = None
     for label, words in groups:
         for word in words:
-            if not word.strip():
+            needle = _fold_nukta(word.strip())
+            if not needle:
                 continue
-            if re.search(r"[a-z]", word):
-                match = re.search(rf"(?<![a-z]){re.escape(word)}(?![a-z])", text, re.I)
+            if re.search(r"[a-z]", needle):
+                match = re.search(rf"(?<![a-z]){re.escape(needle)}(?![a-z])", hay, re.I)
                 index = match.start() if match else -1
-                found = word
+                found = needle
             else:
-                index = text.find(word)
-                found = word
+                index = hay.find(needle)
+                found = needle
             if index != -1 and (best is None or index < best[2]):
                 best = (label, found, index)
     return best
@@ -744,16 +984,20 @@ def detect_switch(text: str) -> str | None:
 
 def _polarity_word(text: str) -> bool | None:
     """True/False when the utterance is only a yes or a no, not a new fact."""
-    if _find_keyword(text, OCCUPATIONS) or re.search(NUM, text, re.I):
+    cleaned = strip_slot_punct(text)
+    if _find_keyword(cleaned, OCCUPATIONS) or re.search(NUM, cleaned, re.I):
         # A bare "do" is the number 2 and also not a yes. Facts win.
-        if not re.fullmatch(r"\s*(haan+|han|ha|yes|yeah|yep|no|nahi|nahin|nope)\s*[.!]?\s*", text, re.I):
-            if re.search(r"\b(haan+|han|yes|yeah)\b", text, re.I) and len(text.split()) <= 2:
+        if not re.fullmatch(r"(haan+|han|ha|yes|yeah|yep|no|nahi|nahin|nope)", cleaned, re.I):
+            if re.search(r"\b(haan+|han|yes|yeah)\b", cleaned, re.I) and len(cleaned.split()) <= 2:
                 return True
             return None
-    if re.search(r"\b(haan+|han|ha|yes|yeah|yep|houdu|haudu|avunu|aama|aam|ho|ji|sahi|correct)\b", text, re.I):
-        if not NEG.search(text):
+    answer = yes_no(cleaned)
+    if answer is not None:
+        return answer
+    if re.search(r"\b(haan+|han|ha|yes|yeah|yep|houdu|haudu|avunu|aama|aam|ho|ji|sahi|correct)\b", cleaned, re.I):
+        if not NEG.search(cleaned):
             return True
-    if NEG.search(text) and len(text.split()) <= 6:
+    if NEG.search(cleaned) and len(cleaned.split()) <= 6:
         return False
     return None
 
@@ -784,9 +1028,104 @@ def polarity_for(field: str | None, text: str) -> bool | None:
     return None
 
 
+_BARE_MEASURE = re.compile(rf"^({NUM})(?:\s+(?:{LAND_UNITS}|{AGE_UNITS}|lakh))?$", re.I)
+
+
+def _bare_measure(field: str, text: str):
+    """A reply that is only a number, optionally with a unit, for the slot just asked."""
+    cleaned = _fold_nukta(strip_slot_punct(normalize_digits(text)))
+    match = _BARE_MEASURE.match(cleaned)
+    if not match:
+        return None
+    amount = _parse_number(match.group(1))
+    if amount is None:
+        return None
+    if field == "annual_income":
+        if re.search(r"lakh", cleaned, re.I):
+            return int(amount * 100000)
+        if amount >= 1000:
+            return int(amount)
+        return None
+    if field == "land_acres":
+        if 0 < amount <= 100:
+            return float(amount)
+        return None
+    if field in ("age", "senior_age"):
+        years = int(amount)
+        if 1 <= years <= 120:
+            return years
+    return None
+
+
+def answer_pending(field: str | None, text: str):
+    """What a short reply means when this slot was the question just asked."""
+    if not field:
+        return None
+    cleaned = strip_slot_punct(normalize_digits(text or ""))
+    if not cleaned:
+        return None
+    if field == "occupation":
+        hit = _find_keyword(cleaned, OCCUPATIONS)
+        return hit[0] if hit else None
+    if field == "artisan_trade":
+        hit = _find_keyword(cleaned, TRADES)
+        return hit[0] if hit else None
+    if field == "crop":
+        hit = _find_keyword(cleaned, CROPS)
+        return hit[0] if hit else None
+    if field == "gender":
+        woman = _find_keyword(cleaned, (("woman", WOMAN),))
+        man = _find_keyword(cleaned, (("man", MAN),))
+        if woman and (not man or woman[2] <= man[2]):
+            return "woman"
+        if man:
+            return "man"
+        return None
+    if field == "area":
+        rural = _find_keyword(cleaned, (("rural", RURAL),))
+        urban = _find_keyword(cleaned, (("urban", URBAN),))
+        if rural and (not urban or rural[2] <= urban[2]):
+            return "rural"
+        if urban:
+            return "urban"
+        return None
+    if field in ("age", "senior_age", "land_acres", "annual_income"):
+        return _bare_measure(field, cleaned)
+    if field in {
+        "bpl",
+        "crop_loss",
+        "widow",
+        "disability",
+        "pregnant",
+        "bank_account",
+        "aadhaar_seeded",
+        "mobile_linked",
+        "name_match",
+        "lpg",
+    }:
+        return polarity_for(field, cleaned)
+    found = extract(cleaned)
+    if field in found.values:
+        return found.values[field]
+    return None
+
+
+def classify_enum(field: str, raw: str):
+    """Map a model's own word, including 'खेती।', onto the profile value."""
+    cleaned = strip_slot_punct(str(raw or ""))
+    if not cleaned:
+        return None
+    if field in {"occupation", "crop", "artisan_trade", "gender", "area"}:
+        return answer_pending(field, cleaned)
+    found = extract(cleaned)
+    if field in found.values:
+        return found.values[field]
+    return answer_pending(field, cleaned)
+
+
 def extract(raw: str) -> Extraction:
     original = raw.strip()
-    text = normalize_digits(original)
+    text = strip_slot_punct(normalize_digits(original))
     ignored = bool(re.search(r"\d{10,}", text))
     if ignored:
         text = re.sub(r"\d{10,}", " ", text)
@@ -800,7 +1139,7 @@ def extract(raw: str) -> Extraction:
         heard[field] = _snippet(text, start, end) or original[:80]
 
     # Place. Exact names fill the field. A near miss is only a guess.
-    place_values, place_heard, place_guesses = resolve_place(original)
+    place_values, place_heard, place_guesses = resolve_place(text)
     for field, value in place_values.items():
         values[field] = value
         heard[field] = place_heard.get(field) or original[:80]
@@ -912,18 +1251,22 @@ def extract(raw: str) -> Extraction:
         if match:
             put(field, not _negated(text, match.start(), match.end()), match.start(), match.end())
 
-    housing = re.search(r"kutcha|kachcha|kaccha|कच्चा", text, re.I)
+    housing = re.search(r"kutcha|kachcha|kaccha|कच्चा|कच्चे|ಕಚ್ಚಾ|కచ్చా|கச்சா|কাঁচা|കച്ച", text, re.I)
     if housing:
         put("housing", "kutcha", housing.start(), housing.end())
     else:
-        pucca = re.search(r"pucca|pakka|पक्का", text, re.I)
+        pucca = re.search(r"pucca|pakka|पक्का|पक्के|ಪಕ್ಕಾ|పక్కా|பக்கா|পাকা|പക്ക", text, re.I)
         if pucca and not _negated(text, pucca.start(), pucca.end()):
             put("housing", "pucca", pucca.start(), pucca.end())
     homeless = re.search(r"homeless|beghar|बेघर", text, re.I)
     if homeless:
         put("housing", "homeless", homeless.start(), homeless.end())
 
-    lpg = re.search(r"\blpg\b|cylinder|gas connection|gas chulha", text, re.I)
+    lpg = re.search(
+        r"\blpg\b|cylinder|gas connection|gas chulha|सिलेंडर|सिलिंडर|गैस|గ్యాస్|ಗ್ಯಾಸ್|கேஸ்|গ্যাস|ഗ്യാസ്",
+        text,
+        re.I,
+    )
     if lpg:
         put("lpg", not _negated(text, lpg.start(), lpg.end()), lpg.start(), lpg.end())
 
@@ -949,12 +1292,16 @@ def extract(raw: str) -> Extraction:
     if mobile:
         put("mobile_linked", not _negated(text, mobile.start(), mobile.end()), mobile.start(), mobile.end())
 
-    category = re.search(r"\bsc\b|scheduled caste|anusuchit|\bst\b|scheduled tribe|\bobc\b", text, re.I)
+    category = re.search(
+        r"scheduled tribe|\bst\b|अनुसूचित जनजाति|एसटी|scheduled caste|anusuchit|\bsc\b|अनुसूचित जाति|एससी|\bobc\b|ओबीसी|पिछड़",
+        text,
+        re.I,
+    )
     if category:
         token = category.group(0).lower()
-        if "tribe" in token or token == "st":
+        if "tribe" in token or token == "st" or "जनजाति" in category.group(0) or "एसटी" in category.group(0):
             put("category", "st", category.start(), category.end())
-        elif "caste" in token or token == "sc" or "anusuchit" in token:
+        elif "caste" in token or token == "sc" or "anusuchit" in token or "जाति" in category.group(0) or "एससी" in category.group(0):
             put("category", "sc", category.start(), category.end())
         else:
             put("category", "obc", category.start(), category.end())
