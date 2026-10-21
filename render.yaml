@@ -22,13 +22,15 @@ services:
         value: timbre-v3.0
       - key: GNANI_TTS_VOICE
         value: Shivani
+      - key: GNANI_TTS_VOICE_EN
+        sync: false
       - key: GNANI_TTS_SPEED
         value: "0.92"
       - key: LLM_BASE_URL
-        sync: false
+        value: https://api.groq.com/openai/v1
       - key: LLM_API_KEY
         sync: false
       - key: LLM_MODEL
-        value: evon
+        value: llama-3.1-8b-instant
       - key: LLM_ENABLED
         value: auto

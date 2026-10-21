@@ -12,6 +12,21 @@ from app.session import SESSIONS, CallSession
 from tests.test_rules import _until
 
 
+def test_stt_and_tts_explain_the_missing_key(monkeypatch):
+    monkeypatch.setattr("app.config.settings.gnani_api_key", "")
+    with TestClient(app) as client:
+        stt = client.post(
+            "/api/stt",
+            files={"file": ("clip.wav", b"\x00\x00" * 40, "audio/wav")},
+            data={"language": "kn"},
+        )
+        tts = client.post("/api/tts", json={"text": "namaskara", "language": "kn"})
+        assert stt.status_code == 409
+        assert tts.status_code == 409
+        assert "GNANI_API_KEY" in stt.json()["detail"]
+        assert "device voice" in tts.json()["detail"].casefold()
+
+
 def test_filler_lines_stay_short_in_every_language():
     for language in ("hi", "hi-en", "en", "kn", "te", "ta", "mr", "bn", "ml", "zz"):
         line = filler_line(language)

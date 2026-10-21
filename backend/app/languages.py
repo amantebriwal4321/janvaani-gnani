@@ -8,6 +8,23 @@ Timbre TTS accepts the same -IN codes, and `hi-en` is valid for Hinglish speech.
 
 LANGS = ("hi", "hi-en", "en", "kn", "te", "ta", "mr", "bn", "ml")
 
+_PRIMARY = {"hi", "en", "kn", "te", "ta", "mr", "bn", "ml"}
+
+
+def app_language(tag: str | None) -> str | None:
+    """Map an STT language tag onto a call language. Unknown tags return None."""
+    if not tag:
+        return None
+    raw = tag.strip().lower().replace("_", "-")
+    if raw in {"", "auto", "indic-auto", "unknown", "und"}:
+        return None
+    if raw in {"hi-en", "hinglish", "hi-latn"}:
+        return "hi-en"
+    primary = raw.split("-", 1)[0]
+    if primary in _PRIMARY:
+        return primary
+    return None
+
 # Prisma language_code / lang_code. Never hi-en.
 STT_CODE = {
     "hi": "hi-IN",

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Landing } from "@/components/landing";
 import { VoiceOrb } from "@/components/voice-orb";
 import { Button } from "@/components/ui/button";
-import { connectionLabel } from "@/lib/line-status";
+import { connectionLabel, wakeCaption } from "@/lib/line-status";
 import { LANGUAGES, PHRASES } from "@/lib/phrases";
 import { useCall, type SchemeMatch } from "@/lib/use-call";
 
@@ -110,15 +110,16 @@ export function Desk() {
   }
 
   function begin(demo: boolean) {
-    // Start the call in this tap, before scrolling. getUserMedia has to run
-    // before the gesture ends, or the browser never asks for the microphone.
+    if (call.line !== "ready") return;
+    // Start the call in this tap, before scrolling. getUserMedia and speech
+    // recognition have to run before the gesture ends.
     if (!(established && !demo)) void call.start({ demo });
     document.getElementById("desk")?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   }
 
   function onOrb() {
     if (inCall) call.hangup();
-    else void call.start();
+    else if (call.line === "ready") void call.start();
   }
 
   return (
@@ -134,7 +135,7 @@ export function Desk() {
             <span className={`status-pill ${statusTone}`} role="status">
               {statusLabel}
             </span>
-            <button type="button" className="cta cta-small" onClick={() => begin(false)}>
+            <button type="button" className="cta cta-small" onClick={() => begin(false)} disabled={call.line !== "ready"}>
               Start talking
             </button>
           </div>
@@ -152,9 +153,7 @@ export function Desk() {
               <p className="text-sm font-semibold text-[#8a4e12]">
                 {call.line === "down" ? "Still waking the line…" : "Waking up the line…"}
               </p>
-              <p className="mt-0.5 text-sm leading-relaxed text-[#5c5146]">
-                The voice server sleeps when nobody is calling. This page is waking it. Start talking still asks for the microphone, and the call connects when the line answers.
-              </p>
+              <p className="mt-0.5 text-sm leading-relaxed text-[#5c5146]">{wakeCaption(call.wakeProgress, call.line)}</p>
             </div>
             <div className="w-full sm:w-48 sm:shrink-0">
               <div
@@ -173,12 +172,42 @@ export function Desk() {
         </div>
       ) : null}
 
+      {call.line === "ready" && call.health?.speech === "mock" ? (
+        <div className="border-b border-[#f0ddb4] bg-[#fff4df] px-4 py-3" role="status">
+          <div className="mx-auto max-w-6xl">
+            <p className="text-sm font-semibold text-[#8a4e12]">Mock mode</p>
+            <p className="mt-0.5 text-sm leading-relaxed text-[#3c342c]">
+              No Gnani key is set, so this browser listens and speaks. Scheme matches still follow the fixed rules, not a language model.
+              {call.speechBlock ? ` ${call.speechBlock}` : " Speech and synthesis stay off until a key is set: /api/stt and /api/tts return 409."}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {call.line === "ready" && call.phase === "idle" && call.greetingWarm ? (
+        <div className="border-b border-[#d7eadf] bg-[#eef6f1] px-4 py-2" role="status">
+          <p className="mx-auto max-w-6xl text-sm text-[#0e6b45]">Greeting is ready. The first hello should start quickly.</p>
+        </div>
+      ) : null}
+
+      {call.demo ? (
+        <div className="border-b border-[#d7e4f5] bg-[#eef4fb] px-4 py-3" role="status">
+          <div className="mx-auto max-w-6xl">
+            <p className="text-sm font-semibold text-[#1d4e89]">Demo mode</p>
+            <p className="mt-0.5 text-sm leading-relaxed text-[#3c342c]">
+              A practice Kolar household speaks for you. The microphone stays off. You can still type a line.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       <Landing
         language={language}
         onLanguage={chooseLanguage}
         onStart={() => begin(false)}
         onDemo={() => begin(true)}
         speech={call.health?.speech ?? null}
+        canStart={call.line === "ready"}
       />
 
       <main id="desk" className="scroll-mt-20 mx-auto grid max-w-6xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(300px,420px)_1fr]">
@@ -187,7 +216,11 @@ export function Desk() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold tracking-[0.16em] text-[#e7c9a4] uppercase">The line</p>
-                <p className="mt-1 text-base text-[#f6f1e7]/80">{PHASE_LINE[call.phase]}</p>
+                <p className="mt-1 text-base text-[#f6f1e7]/80">
+                  {call.browserEar && call.phase === "listening"
+                    ? "Listening in this browser. Speak, or tap a phrase."
+                    : PHASE_LINE[call.phase]}
+                </p>
               </div>
               <p className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold tracking-wide">
                 {call.health?.speech === "gnani" ? `Shivani · Gnani` : "Practice voice"}
@@ -195,7 +228,7 @@ export function Desk() {
             </div>
 
             <div className="mt-2 flex justify-center">
-              <VoiceOrb phase={call.phase} level={call.level} onPress={onOrb} />
+              <VoiceOrb phase={call.phase} level={call.level} onPress={onOrb} disabled={!inCall && call.line !== "ready"} />
             </div>
 
             <p className="text-center text-sm text-[#e7c9a4]">

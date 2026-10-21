@@ -16,10 +16,12 @@ export function VoiceOrb({
   phase,
   level,
   onPress,
+  disabled,
 }: {
   phase: Phase;
   level: number;
   onPress: () => void;
+  disabled?: boolean;
 }) {
   const live = phase === "listening" || phase === "speaking" || phase === "thinking" || phase === "connecting";
   const energy = Math.max(0.12, Math.min(1, level));
@@ -30,6 +32,7 @@ export function VoiceOrb({
       data-phase={phase}
       style={{ ["--level" as string]: String(energy) }}
       onClick={onPress}
+      disabled={disabled}
       aria-pressed={live}
     >
       <span className="orb-ring" aria-hidden="true" />

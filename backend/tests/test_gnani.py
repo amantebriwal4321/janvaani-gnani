@@ -57,6 +57,18 @@ def test_tts_body_matches_the_live_fields():
     assert body["audio_config"] == {"sample_rate": 8000, "encoding": "linear_pcm", "container": "wav"}
     mulaw = tts_body("नमस्ते", "hi", "mulaw")
     assert mulaw["audio_config"] == {"container": "mulaw"}
+    assert tts_code("en") == "en-IN"
+    english = tts_body("Hello", "en")
+    assert english["language"] == "en-IN"
+    assert english["voice"] == body["voice"]
+
+
+def test_english_tts_voice_override(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "gnani_tts_voice_en", "en-desk")
+    assert tts_body("Hello", "en")["voice"] == "en-desk"
+    assert tts_body("नमस्ते", "hi")["voice"] != "en-desk"
 
 
 def test_stt_websocket_headers_match_the_live_socket():
@@ -80,6 +92,15 @@ def test_prisma_messages():
     assert final.text == "नमस्ते"
     assert final.segment_index == 1
     assert final.is_final is True
+    assert final.language == ""
+    tagged = parse_stt_message(
+        {"type": "transcript", "text": "hello", "is_final": True, "language_code": "en-IN"}
+    )
+    assert tagged is not None and tagged.language == "en-IN"
+    nested = parse_stt_message(
+        {"type": "transcript", "text": "ನಮಸ್ಕಾರ", "is_final": True, "metadata": {"detected_language": "kn-IN"}}
+    )
+    assert nested is not None and nested.language == "kn-IN"
 
 
 def test_wav_strips_and_raw_mulaw_passes_through():

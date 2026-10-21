@@ -228,7 +228,10 @@ def test_mock_call_socket_end_to_end(monkeypatch):
         with client.websocket_connect("/ws/call") as ws:
             ws.send_json({"type": "start", "language": "hi"})
             ready = _until(ws, lambda m: m.get("type") == "ready")
+            assert ready["mode"] == "mock"
+            assert ready["listen"] == "browser"
             session_id = ready["sessionId"]
+            ws.send_bytes(b"\x00\x00" * 80)
             _until(ws, lambda m: m.get("type") == "speak")
             ws.send_json({"type": "utterance", "text": KOLAR})
             state = _until(ws, lambda m: m.get("type") == "state" and m["state"]["user_turns"] >= 1)

@@ -5,8 +5,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from app.dialogue import describe_updates, question_for, say, strip_tags
+from app.dialogue import describe_updates, say, strip_tags, varied_question
 from app.extract import extract, polarity_for
+from app.languages import app_language
+from app.llm import clip_reply, reply_matches_language
 from app.models import PROFILE_FIELDS, Profile
 from app.schemes import (
     csc_text,
@@ -130,6 +132,48 @@ def share_text(ref: str, profile: Profile, matches, documents: list[str], fixes:
     return "\n".join(lines)
 
 
+_ASK_ORDER = (
+    "district",
+    "occupation",
+    "land_acres",
+    "crop",
+    "age",
+    "senior_age",
+    "gender",
+    "area",
+    "annual_income",
+    "bpl",
+    "housing",
+    "lpg",
+    "bank_account",
+    "name_match",
+    "mobile_linked",
+    "aadhaar_seeded",
+    "widow",
+    "pregnant",
+    "category",
+    "ration",
+)
+
+
+def _same_line(left: str, right: str) -> bool:
+    return " ".join((left or "").split()) == " ".join((right or "").split())
+
+
+def _reached(matches) -> frozenset:
+    return frozenset(item.scheme_id for item in matches if item.status in ("qualify", "likely"))
+
+
+def _upcoming(profile: Profile) -> list[str]:
+    names: list[str] = []
+    for field in _ASK_ORDER:
+        if getattr(profile, field, None) is None:
+            names.append(field)
+        if len(names) == 4:
+            break
+    return names
+
+
 def gaps_only(profile: Profile, patch: dict) -> dict:
     """LLM fills may not overwrite a field the rules already set."""
     clean = {}
@@ -161,6 +205,8 @@ class Brain:
         self.user_turns = 0
         self.llm_status = "off"
         self.last_reply = ""
+        self.ask_counts: dict[str, int] = {}
+        self.pending_language_hint: str | None = None
 
     def set_language(self, code: str) -> None:
         if code in ("", "auto", None):
@@ -202,21 +248,29 @@ class Brain:
         tts = reply
         return TurnResult(reply=reply, tts=tts, language=self.language, snapshot=self.snapshot())
 
-    async def utterance(self, text: str, llm) -> TurnResult:
+    async def utterance(self, text: str, llm, language_hint: str | None = None) -> TurnResult:
         text = (text or "").strip()
+        if language_hint is None:
+            language_hint = self.pending_language_hint
+        self.pending_language_hint = None
         if not text:
+            reply = self._avoid_repeat(say("unclear", self.language), 1)
+            self.last_reply = reply
             return TurnResult(
-                reply=say("unclear", self.language),
-                tts=say("unclear", self.language),
+                reply=reply,
+                tts=reply,
                 language=self.language,
                 snapshot=self.snapshot(),
             )
         found = extract(text)
+        hinted = app_language(language_hint)
         if found.switched_to:
             self.language = found.switched_to
             self.language_locked = True
-        elif found.language and not self.language_locked:
-            self.language = found.language
+        elif not self.language_locked:
+            detected = hinted or found.language
+            if detected:
+                self.language = detected
 
         updated: list[str] = []
         for field, value in found.values.items():
@@ -233,16 +287,31 @@ class Brain:
             if self.pending not in updated:
                 updated.append(self.pending)
 
+        matches_now = match_all(self.profile)
+        reached_before = _reached(matches_now)
+        pending_hint = next_field(self.profile, matches_now)
+        scheme_names = [spoken_name(item, self.language) for item in matches_now if item.status in ("qualify", "likely")][:3]
+        spoken = ""
         if llm is not None and not found.ignored_id_number:
             try:
-                patch = await llm.extract_gaps(text, self.profile)
-                for field, value in gaps_only(self.profile, patch).items():
+                turn = await llm.complete_turn(
+                    text=text,
+                    profile=self.profile,
+                    language=self.language,
+                    pending=pending_hint,
+                    upcoming=_upcoming(self.profile),
+                    last_reply=self.last_reply,
+                    scheme_names=scheme_names,
+                )
+                for field, value in gaps_only(self.profile, turn.fields).items():
                     setattr(self.profile, field, value)
                     self.heard[field] = text[:80]
                     updated.append(field)
+                spoken = (turn.reply or "").strip()
                 self.llm_status = "used"
             except Exception:
                 self.llm_status = "fallback"
+                spoken = ""
         else:
             self.llm_status = "off" if llm is None else self.llm_status
 
@@ -250,11 +319,50 @@ class Brain:
         matches = match_all(self.profile)
         self.pending = next_field(self.profile, matches)
         level = slip_level(self.profile, matches)
-        reply, tts = self._compose(updated, matches, level, found.ignored_id_number, bool(found.switched_to))
+        if updated:
+            self.ask_counts.clear()
+        elif self.pending:
+            self.ask_counts[self.pending] = self.ask_counts.get(self.pending, 0) + 1
+        variant = 0 if updated or not self.pending else max(0, self.ask_counts[self.pending] - 1)
+        display, tts = self._compose(
+            updated, matches, level, found.ignored_id_number, bool(found.switched_to), variant
+        )
+
+        # New facts keep the rule engine's wording, so a scheme line cannot drift.
+        # An unrelated line uses the model, then a varied fallback if that fails.
+        use_model = bool(spoken) and not updated and reply_matches_language(spoken, self.language)
+        if use_model and _reached(matches) != reached_before:
+            use_model = False
+        if use_model and self.pending and "?" not in spoken and "？" not in spoken:
+            question = varied_question(self.pending, self.language, variant)
+            if question and question not in spoken:
+                spoken = clip_reply(f"{spoken.rstrip()} {question}")
+        if use_model:
+            spoken = clip_reply(spoken)
+        if use_model and (not spoken or _same_line(spoken, self.last_reply) or not reply_matches_language(spoken, self.language)):
+            use_model = False
+        if use_model:
+            reply, tts = spoken, spoken
+        elif _same_line(display, self.last_reply):
+            reply = self._avoid_repeat(display, variant + 1)
+            tts = reply
+        else:
+            reply = display
         self.last_reply = reply
         return TurnResult(reply=reply, tts=tts, language=self.language, snapshot=self.snapshot())
 
-    def _compose(self, updated, matches, level, ignored: bool, switched: bool) -> tuple[str, str]:
+    def _avoid_repeat(self, current: str, variant: int) -> str:
+        unclear_key = ("unclear_b", "unclear_c", "unclear")[variant % 3]
+        if self.pending:
+            line = f"{say(unclear_key, self.language)} {varied_question(self.pending, self.language, variant + 1)}"
+        else:
+            line = say("invite", self.language)
+        cleaned = strip_tags(line)
+        if _same_line(cleaned, current) or _same_line(cleaned, self.last_reply):
+            cleaned = strip_tags(f"{say('ack', self.language)} {varied_question(self.pending, self.language, variant + 2)}")
+        return cleaned
+
+    def _compose(self, updated, matches, level, ignored: bool, switched: bool, variant: int = 0) -> tuple[str, str]:
         lang = self.language
         parts: list[str] = []
         if ignored:
@@ -274,7 +382,7 @@ class Brain:
         if fresh and good:
             parts.append(say("schemes_line", lang, schemes=scheme_text))
         if not updated and not switched and not ignored:
-            parts.append(say("unclear", lang))
+            parts.append(say(("unclear", "unclear_b", "unclear_c")[variant % 3], lang))
         elif updated and not facts and not switched:
             parts.append(say("ack", lang))
 
@@ -287,7 +395,7 @@ class Brain:
             if self.profile.bank_account is False:
                 parts.append(say("fix_bank", lang))
         elif self.pending:
-            parts.append(question_for(self.pending, lang))
+            parts.append(varied_question(self.pending, lang, variant))
         else:
             parts.append(say("invite", lang))
 

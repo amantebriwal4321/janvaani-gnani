@@ -1,6 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  HEALTH_ABORT_MS,
+  HEALTH_KEEPALIVE_MS,
+  HEALTH_RETRY_MS,
+  deviceSpeechTimeout,
+  rankedVoice,
+  recognitionLang,
+} from "./browser-speech";
 import { apiBase, wsBase } from "./endpoints";
 import { classifyMic, wakePercent, type LineState } from "./line-status";
 import { BROWSER_LANG } from "./phrases";
@@ -122,11 +130,39 @@ function requestMic(): Promise<MediaStream> {
   });
 }
 
+let voiceList: SpeechSynthesisVoice[] = [];
+
+function rememberVoices() {
+  voiceList = window.speechSynthesis?.getVoices?.() ?? voiceList;
+}
+
 function pickVoice(lang: string): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis?.getVoices?.() ?? [];
-  const prefix = (lang || "hi-IN").slice(0, 2).toLowerCase();
-  const same = voices.filter((voice) => voice.lang.toLowerCase().startsWith(prefix));
-  return same.find((voice) => /female|woman|natural/i.test(voice.name)) || same[0] || null;
+  const voices = voiceList.length ? voiceList : (window.speechSynthesis?.getVoices?.() ?? []);
+  return rankedVoice(voices, lang);
+}
+
+type BrowserRecognition = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: BrowserSpeechEvent) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type BrowserSpeechEvent = {
+  resultIndex: number;
+  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+};
+
+function recognitionCtor(): (new () => BrowserRecognition) | null {
+  const host = window as Window & {
+    SpeechRecognition?: new () => BrowserRecognition;
+    webkitSpeechRecognition?: new () => BrowserRecognition;
+  };
+  return host.SpeechRecognition || host.webkitSpeechRecognition || null;
 }
 
 export function useCall(language: string) {
@@ -142,6 +178,9 @@ export function useCall(language: string) {
   const [line, setLine] = useState<LineState>("waking");
   const [wakeProgress, setWakeProgress] = useState(8);
   const [mic, setMic] = useState<MicAccess>("unknown");
+  const [speechBlock, setSpeechBlock] = useState<string | null>(null);
+  const [browserEar, setBrowserEar] = useState(false);
+  const [greetingWarm, setGreetingWarm] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const playerRef = useRef<Player | null>(null);
@@ -158,11 +197,26 @@ export function useCall(language: string) {
   const queued = useRef<string[]>([]);
   const callGen = useRef(0);
   const languageRef = useRef(language);
+  const healthRef = useRef<Health | null>(null);
+  const recRef = useRef<BrowserRecognition | null>(null);
+  const sendTextRef = useRef<(text: string, nextLanguage?: string) => void>(() => undefined);
+  const armEarRef = useRef<() => void>(() => undefined);
   languageRef.current = language;
 
   const go = useCallback((next: Phase) => {
     phaseRef.current = next;
     setPhase(next);
+  }, []);
+
+  useEffect(() => {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    const load = () => {
+      rememberVoices();
+    };
+    load();
+    synth.addEventListener("voiceschanged", load);
+    return () => synth.removeEventListener("voiceschanged", load);
   }, []);
 
   useEffect(() => {
@@ -174,27 +228,56 @@ export function useCall(language: string) {
       setWakeProgress(wakePercent(Date.now() - started));
     }, 400);
 
-    async function wake() {
-      while (!gone) {
-        const controller = new AbortController();
-        const timer = window.setTimeout(() => controller.abort(), 8000);
-        try {
-          const response = await fetch(`${apiBase()}/api/health`, { cache: "no-store", signal: controller.signal });
-          if (!response.ok) throw new Error("down");
-          const body = (await response.json()) as Health;
-          if (gone) return;
-          setHealth(body);
-          awake = true;
-          setLine("ready");
-          setWakeProgress(100);
+    async function ping(): Promise<Health | null> {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), HEALTH_ABORT_MS);
+      try {
+        const response = await fetch(`${apiBase()}/api/health`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("down");
+        return (await response.json()) as Health;
+      } catch {
+        return null;
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+
+    function apply(body: Health) {
+      awake = true;
+      healthRef.current = body;
+      setHealth(body);
+      setLine("ready");
+      setWakeProgress(100);
+    }
+
+    async function untilAwake(mark: number) {
+      while (!gone && !awake) {
+        const body = await ping();
+        if (gone) return;
+        if (body) {
+          apply(body);
           return;
-        } catch {
-          if (gone) return;
-          if (Date.now() - started > 45000) setLine("down");
-          await new Promise((resolve) => window.setTimeout(resolve, 2500));
-        } finally {
-          window.clearTimeout(timer);
         }
+        if (Date.now() - mark > HEALTH_ABORT_MS * 2) setLine("down");
+        await new Promise((resolve) => window.setTimeout(resolve, HEALTH_RETRY_MS));
+      }
+    }
+
+    async function wake() {
+      await untilAwake(started);
+      while (!gone) {
+        await new Promise((resolve) => window.setTimeout(resolve, HEALTH_KEEPALIVE_MS));
+        if (gone) return;
+        const body = (await ping()) || (await ping());
+        if (gone) return;
+        if (body) {
+          apply(body);
+          continue;
+        }
+        awake = false;
+        setLine("waking");
+        setWakeProgress(8);
+        await untilAwake(Date.now());
       }
     }
 
@@ -204,6 +287,88 @@ export function useCall(language: string) {
       window.clearInterval(tick);
     };
   }, []);
+
+  useEffect(() => {
+    if (line !== "ready" || health?.speech !== "mock") {
+      setSpeechBlock(null);
+      return;
+    }
+    let gone = false;
+    async function probe() {
+      const notes: string[] = [];
+      try {
+        const form = new FormData();
+        form.append("language", "hi");
+        form.append("file", new Blob([new Uint8Array(16)], { type: "audio/wav" }), "clip.wav");
+        const stt = await fetch(`${apiBase()}/api/stt`, { method: "POST", body: form });
+        if (stt.status === 409) {
+          const body = (await stt.json().catch(() => ({}))) as { detail?: string };
+          if (body.detail) notes.push(body.detail);
+        }
+      } catch {
+        /* The banner still explains mock mode if this probe cannot run. */
+      }
+      try {
+        const tts = await fetch(`${apiBase()}/api/tts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: " ", language: "hi" }),
+        });
+        if (tts.status === 409) {
+          const body = (await tts.json().catch(() => ({}))) as { detail?: string };
+          if (body.detail && !notes.includes(body.detail)) notes.push(body.detail);
+        }
+      } catch {
+        /* Same as the speech-to-text probe. */
+      }
+      if (!gone) setSpeechBlock(notes.length ? notes.join(" ") : null);
+    }
+    void probe();
+    return () => {
+      gone = true;
+    };
+  }, [health?.speech, line]);
+
+  useEffect(() => {
+    if (line !== "ready" || health?.speech !== "gnani") {
+      setGreetingWarm(false);
+      return;
+    }
+    let gone = false;
+    const timer = window.setTimeout(() => {
+      const lang = !language || language === "auto" ? "hi" : language;
+      void fetch(`${apiBase()}/api/warm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language: lang }),
+      })
+        .then(async (response) => {
+          if (!response.ok) return;
+          const body = (await response.json()) as { warmed?: boolean };
+          if (!gone && body.warmed) setGreetingWarm(true);
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      gone = true;
+      window.clearTimeout(timer);
+    };
+  }, [health?.speech, language, line]);
+
+  useEffect(() => {
+    if (language !== "auto") return;
+    const detected = callState?.language;
+    const rec = recRef.current;
+    if (!detected || !rec) return;
+    const next = recognitionLang(detected);
+    if (rec.lang === next) return;
+    rec.lang = next;
+    try {
+      rec.stop();
+    } catch {
+      /* onend starts it again in the language just heard */
+    }
+  }, [callState?.language, language]);
 
   const stopAudio = useCallback(() => {
     playerRef.current?.stop();
@@ -238,9 +403,9 @@ export function useCall(language: string) {
       };
       utterance.onend = done;
       utterance.onerror = done;
-      window.speechSynthesis.cancel();
+      // Do not cancel() here. Chrome drops the new utterance when cancel runs in the same turn.
       window.speechSynthesis.speak(utterance);
-      window.setTimeout(done, Math.min(20000, 700 + clean.length * 68));
+      window.setTimeout(done, deviceSpeechTimeout(clean));
     },
     [finishSpeak],
   );
@@ -255,7 +420,73 @@ export function useCall(language: string) {
     }, 180);
   }, [go]);
 
+  const stopEar = useCallback(() => {
+    const rec = recRef.current;
+    recRef.current = null;
+    setBrowserEar(false);
+    if (!rec) return;
+    try {
+      rec.onend = null;
+      rec.stop();
+    } catch {
+      /* already stopped */
+    }
+  }, []);
+
+  const armEar = useCallback(() => {
+    const Ctor = recognitionCtor();
+    if (!Ctor) {
+      setMicNote("This browser cannot hear speech. Type a line, or tap a phrase. JanVaani still answers.");
+      setMic("missing");
+      return;
+    }
+    stopEar();
+    const rec = new Ctor();
+    rec.lang = recognitionLang(languageRef.current);
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (event) => {
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (!result?.isFinal) continue;
+        const text = result[0]?.transcript?.trim();
+        if (text) sendTextRef.current(text);
+      }
+    };
+    rec.onerror = (event) => {
+      const name = event.error || "";
+      if (name === "not-allowed" || name === "service-not-allowed") setMic("denied");
+      if (name === "audio-capture") {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+    };
+    rec.onend = () => {
+      window.setTimeout(() => {
+        if (recRef.current !== rec) return;
+        const phaseNow = phaseRef.current;
+        const live = phaseNow === "listening" || phaseNow === "thinking" || phaseNow === "speaking" || phaseNow === "connecting";
+        if (!live) return;
+        rec.lang = recognitionLang(languageRef.current);
+        try {
+          rec.start();
+        } catch {
+          /* Chrome throws if start overlaps the previous session. onend will try again. */
+        }
+      }, 350);
+    };
+    recRef.current = rec;
+    setBrowserEar(true);
+    try {
+      rec.start();
+    } catch {
+      setMicNote("The browser did not start listening. Tap Try the microphone again, or type a line.");
+    }
+  }, [stopEar]);
+  armEarRef.current = armEar;
+
   const hangup = useCallback(() => {
+    stopEar();
     stopAudio();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -263,7 +494,7 @@ export function useCall(language: string) {
     wsRef.current = null;
     setLevel(0.15);
     go("ended");
-  }, [go, stopAudio]);
+  }, [go, stopAudio, stopEar]);
 
   const barge = useCallback(() => {
     hot.current = 0;
@@ -295,6 +526,7 @@ export function useCall(language: string) {
     },
     [armThinking],
   );
+  sendTextRef.current = sendText;
 
   const attachStream = useCallback(
     async (ctx: AudioContext, media: MediaStream, ticket: number) => {
@@ -352,6 +584,21 @@ export function useCall(language: string) {
     // Both calls stay inside the tap, before the first await.
     const resumePromise = ctx.resume();
     const micPromise = requestMic();
+    if (healthRef.current?.speech === "mock") {
+      void resumePromise.catch(() => undefined);
+      armEarRef.current();
+      try {
+        const media = await micPromise;
+        media.getTracks().forEach((track) => track.stop());
+        if (callGen.current !== ticket) return;
+        setMic("live");
+        setMicNote(null);
+      } catch (err) {
+        if (callGen.current !== ticket) return;
+        setMic(classifyMic(err));
+      }
+      return;
+    }
     void resumePromise.catch(() => undefined);
     try {
       const media = await micPromise;
@@ -375,6 +622,7 @@ export function useCall(language: string) {
       const ticket = ++callGen.current;
       // Stop the previous call first, still inside the tap, so the unlock
       // utterance below is not cancelled.
+      stopEar();
       stopAudio();
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -386,6 +634,7 @@ export function useCall(language: string) {
       const ctx = audioContext();
       ctxRef.current = ctx;
       workletReady.current = false;
+      const browserEarNow = !asDemo && healthRef.current?.speech === "mock";
       const resumePromise = ctx.resume();
       playerRef.current = makePlayer(ctx);
       const micPromise = asDemo ? null : requestMic();
@@ -406,6 +655,7 @@ export function useCall(language: string) {
       setDemo(asDemo);
       setLevel(0.15);
       go("connecting");
+      if (browserEarNow) armEar();
 
       const socket = new WebSocket(`${wsBase()}/ws/call`);
       socket.binaryType = "arraybuffer";
@@ -428,6 +678,11 @@ export function useCall(language: string) {
         if (message.type === "ready") {
           setCallState(null);
           setDemo(Boolean(message.demo));
+          if (message.listen === "browser" && !message.demo) {
+            if (!recRef.current) armEar();
+          } else if (!message.demo) {
+            stopEar();
+          }
           go("listening");
         } else if (message.type === "status") {
           if (message.phase === "speaking") {
@@ -521,6 +776,22 @@ export function useCall(language: string) {
       const pending = queued.current.splice(0);
       for (const text of pending) socket.send(JSON.stringify({ type: "utterance", text }));
 
+      if (browserEarNow) {
+        if (micPromise) {
+          void micPromise
+            .then((media) => {
+              media.getTracks().forEach((track) => track.stop());
+              if (callGen.current !== ticket) return;
+              setMic("live");
+            })
+            .catch((err) => {
+              if (callGen.current !== ticket) return;
+              setMic(classifyMic(err));
+            });
+        }
+        return;
+      }
+
       if (!micPromise) return;
       try {
         const media = await micPromise;
@@ -537,11 +808,18 @@ export function useCall(language: string) {
         setMic(classifyMic(err));
       }
     },
-    [armThinking, attachStream, finishSpeak, go, speakOnDevice, stopAudio],
+    [armEar, armThinking, attachStream, finishSpeak, go, speakOnDevice, stopAudio, stopEar],
   );
 
   useEffect(() => {
     return () => {
+      const rec = recRef.current;
+      recRef.current = null;
+      try {
+        rec?.stop();
+      } catch {
+        /* already stopped */
+      }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       wsRef.current?.close();
       void ctxRef.current?.close();
@@ -553,6 +831,15 @@ export function useCall(language: string) {
     const socket = wsRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "set_language", language: next }));
+    }
+    const rec = recRef.current;
+    if (rec) {
+      rec.lang = recognitionLang(next);
+      try {
+        rec.stop();
+      } catch {
+        /* onend starts it again with the new language */
+      }
     }
   }, []);
 
@@ -575,6 +862,9 @@ export function useCall(language: string) {
     line,
     wakeProgress,
     mic,
+    speechBlock,
+    browserEar,
+    greetingWarm,
     apiBase: apiBase(),
     start,
     enableMic,

@@ -45,6 +45,15 @@ def tts_code(language: str) -> str:
     return TTS_CODE.get(language, "hi-IN")
 
 
+def tts_voice(language: str) -> str:
+    """Shivani by default. English can use GNANI_TTS_VOICE_EN when that is set."""
+    if language == "en":
+        alt = settings.gnani_tts_voice_en.strip()
+        if alt:
+            return alt
+    return settings.gnani_tts_voice
+
+
 def stt_form(language: str, locked: bool = True) -> dict[str, str]:
     return {"language_code": stt_code(language, locked=locked)}
 
@@ -73,7 +82,7 @@ def tts_audio_config(container: str = "wav", sample_rate: int = 8000) -> dict:
 def tts_body(text: str, language: str, container: str = "wav", sample_rate: int = 8000) -> dict:
     return {
         "text": text,
-        "voice": settings.gnani_tts_voice,
+        "voice": tts_voice(language),
         "model": settings.gnani_tts_model,
         "language": tts_code(language),
         "audio_config": tts_audio_config(container, sample_rate),
@@ -108,6 +117,24 @@ class STTEvent:
     is_final: bool = True
     segment_index: int | None = None
     utterance_id: str = ""
+    language: str = ""
+
+
+def _language_tag(data: dict) -> str:
+    """Prisma may tag a transcript. Common keys only; unknown shapes stay empty."""
+    if not isinstance(data, dict):
+        return ""
+    for key in ("language", "language_code", "detected_language", "lang", "lang_code"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for nested in ("metadata", "result"):
+        child = data.get(nested)
+        if isinstance(child, dict):
+            found = _language_tag(child)
+            if found:
+                return found
+    return ""
 
 
 def parse_stt_message(data: dict) -> STTEvent | None:
@@ -132,6 +159,7 @@ def parse_stt_message(data: dict) -> STTEvent | None:
             is_final=True,
             segment_index=index,
             utterance_id=str(data.get("utterance_id") or ""),
+            language=_language_tag(data),
         )
     if kind == "error":
         err = data.get("error") if isinstance(data.get("error"), dict) else {}
@@ -221,10 +249,46 @@ async def fetch_tts(text: str, language: str, container: str = "wav", sample_rat
         return response.content
 
 
+_pcm_cache: dict[tuple[str, str, str], tuple[bytes, int]] = {}
+_pcm_inflight: dict[tuple[str, str, str], asyncio.Task] = {}
+_pcm_guard = asyncio.Lock()
+
+
+def _pcm_key(text: str, language: str) -> tuple[str, str, str]:
+    return (tts_voice(language), tts_code(language), " ".join(text.split()))
+
+
 async def synthesize_pcm(text: str, language: str) -> tuple[bytes, int]:
-    """8 kHz-oriented PCM16. A wav container is stripped; a higher rate is kept for the caller to downsample."""
-    raw = await fetch_tts(text, language, "wav", 8000)
-    return parse_wav(raw)
+    """8 kHz-oriented PCM16. A repeated line, including a warmed greeting, is not fetched twice."""
+    key = _pcm_key(text, language)
+    async with _pcm_guard:
+        hit = _pcm_cache.get(key)
+        if hit:
+            return hit
+        task = _pcm_inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(fetch_tts(text, language, "wav", 8000))
+            _pcm_inflight[key] = task
+    try:
+        raw = await task
+    except Exception:
+        async with _pcm_guard:
+            if _pcm_inflight.get(key) is task:
+                _pcm_inflight.pop(key, None)
+        raise
+    parsed = parse_wav(raw)
+    async with _pcm_guard:
+        if len(_pcm_cache) >= 12:
+            _pcm_cache.clear()
+        _pcm_cache[key] = parsed
+        if _pcm_inflight.get(key) is task:
+            _pcm_inflight.pop(key, None)
+    return parsed
+
+
+async def warm_tts(text: str, language: str) -> None:
+    """Fetch one line into the PCM cache. The first spoken greeting can reuse it."""
+    await synthesize_pcm(text, language)
 
 
 async def synthesize(text: str, language: str) -> AsyncIterator[bytes]:

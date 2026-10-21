@@ -172,6 +172,7 @@ body {
 }
 
 .cta:hover { background: #0b5a3a; }
+.cta:disabled { opacity: 0.45; cursor: not-allowed; }
 .cta:focus-visible { outline: 2px solid #0e6b45; outline-offset: 3px; }
 
 .cta-quiet {
@@ -218,6 +219,11 @@ body {
   background: transparent;
   color: white;
   cursor: pointer;
+}
+
+.orb-hit:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .orb-ring,
