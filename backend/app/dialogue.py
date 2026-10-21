@@ -173,6 +173,39 @@ STRINGS: dict[str, dict[str, str]] = {
         "bn": "আপনি কোন জেলা, কোন রাজ্যের?",
         "ml": "നിങ്ങൾ ഏത് ജില്ല, ഏത് സംസ്ഥാനം?",
     },
+    "ask_district": {
+        "hi": "आप किस ज़िले से हैं?",
+        "hi-en": "Aap kis district se hain?",
+        "en": "Which district are you from?",
+        "kn": "ನೀವು ಯಾವ ಜಿಲ್ಲೆಯವರು?",
+        "te": "మీరు ఏ జిల్లా?",
+        "ta": "நீங்கள் எந்த மாவட்டம்?",
+        "mr": "तुम्ही कोणत्या जिल्ह्यात राहता?",
+        "bn": "আপনি কোন জেলার?",
+        "ml": "നിങ്ങൾ ഏത് ജില്ലയാണ്?",
+    },
+    "confirm_district": {
+        "hi": "क्या आपका ज़िला {district} है?",
+        "hi-en": "Kya aapka district {district} hai?",
+        "en": "Is your district {district}?",
+        "kn": "ನಿಮ್ಮ ಜಿಲ್ಲೆ {district} ಅಲ್ವಾ?",
+        "te": "మీ జిల్లా {district} అవునా?",
+        "ta": "உங்கள் மாவட்டம் {district} தானா?",
+        "mr": "तुमचा जिल्हा {district} आहे का?",
+        "bn": "আপনার জেলা কি {district}?",
+        "ml": "നിങ്ങളുടെ ജില്ല {district} ആണോ?",
+    },
+    "can_do": {
+        "hi": "मैं योजना का फ़ॉर्म भरती हूँ, और सीएससी के लिए पर्ची बनाती हूँ.",
+        "hi-en": "Main scheme ka form bharti hoon, aur CSC ke liye slip banati hoon.",
+        "en": "I fill the scheme form, and I make a CSC slip.",
+        "kn": "ನಾನು ಯೋಜನೆಯ ಫಾರ್ಮ್ ತುಂಬಿಸಿ, ಸಿಎಸ್‌ಸಿ ಚೀಟಿ ಮಾಡುತ್ತೇನೆ.",
+        "te": "నేను పథకం ఫారం నింపి, సీఎస్‌సీ స్లిప్ ఇస్తాను.",
+        "ta": "நான் திட்ட விண்ணப்பத்தை நிரப்பி, சிஎஸ்சி சீட்டு தருகிறேன்.",
+        "mr": "मी योजना अर्ज भरेन आणि सीएससी ची पर्ची देईन.",
+        "bn": "আমি প্রকল্পের ফর্ম ভরে সিএসসি স্লিপ বানিয়ে দিই।",
+        "ml": "ഞാൻ പദ്ധതി ഫോറം നിറച്ച് സിഎസ്‌സി സ്ലിപ്പ് തരാം.",
+    },
     "ask_occupation": {
         "hi": "आप क्या काम करते हैं? खेती, मज़दूरी, दुकान, या कुछ और?",
         "hi-en": "Aap kya kaam karte hain? Kheti, mazdoori, dukaan, ya kuchh aur?",
@@ -517,13 +550,39 @@ LEADS = {
 }
 
 
+def led(text: str, language: str, variant: int = 0) -> str:
+    """A different lead once the same question has already been asked."""
+    if not text or variant <= 0:
+        return text
+    leads = LEADS.get(language) or LEADS["en"]
+    return leads[(variant - 1) % len(leads)] + text
+
+
 def varied_question(field: str | None, language: str, variant: int = 0) -> str:
     """The next missing field, with a different lead once it has been asked before."""
-    base = question_for(field, language)
-    if not base or variant <= 0:
-        return base
-    leads = LEADS.get(language) or LEADS["en"]
-    return leads[(variant - 1) % len(leads)] + base
+    return led(question_for(field, language), language, variant)
+
+
+_DISTRICT_SPOKEN = {
+    "Pakur": {"hi": "पाकुड़", "mr": "पाकुड़", "bn": "পাকুড়"},
+    "Bankura": {"hi": "बाँकुड़ा", "mr": "बाँकुड़ा", "bn": "বাঁকুড়া"},
+}
+
+
+def district_spoken(label: str, language: str) -> str:
+    """How to say a district on the call. English and Hinglish keep the slip spelling."""
+    if language in ("en", "hi-en"):
+        return label
+    return (_DISTRICT_SPOKEN.get(label) or {}).get(language) or label
+
+
+def mentions_district(reply: str, label: str, language: str) -> bool:
+    if not reply or not label:
+        return False
+    if label.lower() in reply.lower():
+        return True
+    spoken = district_spoken(label, language)
+    return bool(spoken and spoken in reply)
 
 
 def strip_tags(text: str) -> str:

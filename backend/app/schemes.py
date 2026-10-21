@@ -604,12 +604,16 @@ NEXT_PRIORITY = (
 )
 
 
-def next_field(profile: Profile, matches: list[Match]) -> str | None:
-    """Ask the CSC rejection checks once two schemes are in reach. Otherwise ask the fact that unlocks the most."""
+def next_field(profile: Profile, matches: list[Match], skip: set[str] | None = None) -> str | None:
+    """Ask the CSC rejection checks once two schemes are in reach. Otherwise ask the fact that unlocks the most.
+
+    `skip` drops a field that was already asked twice without an answer.
+    """
+    skipped = set(skip or ())
     good = [item for item in matches if item.status in ("qualify", "likely")]
     if len(good) >= 2:
         for field in AUDIT_FIELDS:
-            if getattr(profile, field) is None:
+            if field not in skipped and getattr(profile, field) is None:
                 return field
         return None
 
@@ -618,14 +622,17 @@ def next_field(profile: Profile, matches: list[Match]) -> str | None:
         if item.status != "need_answer":
             continue
         for field in item.missing:
+            if field in skipped:
+                continue
             scores[field] = scores.get(field, 0) + 1
-    if profile.district is None and profile.state is None:
+    if profile.district is None and "district" not in skipped:
+        # Keep asking the district after the state is already known, until it is skipped.
         scores["district"] = scores.get("district", 0) + 6
-    if profile.occupation is None:
+    if profile.occupation is None and "occupation" not in skipped:
         scores["occupation"] = scores.get("occupation", 0) + 1
-    if profile.occupation == "farmer" and profile.land_acres is None:
+    if profile.occupation == "farmer" and profile.land_acres is None and "land_acres" not in skipped:
         scores["land_acres"] = scores.get("land_acres", 0) + 3
-    if profile.age is None:
+    if profile.age is None and "age" not in skipped:
         scores["age"] = scores.get("age", 0) + 1
     if not scores:
         return None

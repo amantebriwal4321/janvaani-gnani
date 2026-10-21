@@ -61,8 +61,8 @@ BROWSER_LANG = {
     "ml": "ml-IN",
 }
 
-# Letters only, one word each. Kept for the desk; the live Prisma socket
-# that transcribed 8 kHz audio did not require a bias header.
+# Letters only, one word each, at most 100. Sent on the Prisma socket as
+# x-bias-list with x-bias-score. A digit or symbol drops the whole list.
 
 BIAS_WORDS = (
     "PMKISAN",
@@ -94,4 +94,43 @@ BIAS_WORDS = (
     "Mysuru",
     "Nagpur",
     "Nizamabad",
+    "Pakur",
+    "Bankura",
+    "Ranchi",
+    "Dhanbad",
+    "Bokaro",
+    "Dumka",
+    "Deoghar",
+    "Giridih",
+    "Hazaribagh",
+    "Jamshedpur",
+    "Godda",
+    "Sahebganj",
+    "Palamu",
+    "Gumla",
+    "Chaibasa",
+    "Jamtara",
+    "Ramgarh",
+    "Chatra",
+    "Koderma",
+    "Lohardaga",
+    "Simdega",
+    "Khunti",
+    "Garhwa",
+    "Latehar",
+    "Jharkhand",
+    "Karnataka",
+    "Maharashtra",
+    "Telangana",
+    "Bengal",
+    "Kerala",
+    "Bihar",
+    "Odisha",
+    "Assam",
+    "Delhi",
+    "Punjab",
+    "Haryana",
+    "Gujarat",
+    "Rajasthan",
+    "Chhattisgarh",
 )

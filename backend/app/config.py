@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     # LLM_ENABLED=off disables the model. Eligibility is never the model's.
     llm_base_url: str = "https://api.groq.com/openai/v1"
     llm_api_key: str = ""
-    llm_model: str = "llama-3.1-8b-instant"
+    # llama-3.1-8b-instant was shut down on Groq's free and developer tiers
+    # on 2026-08-16. openai/gpt-oss-20b is the fast replacement. A deployed
+    # service that still names the old id is retried once onto this model.
+    llm_model: str = "openai/gpt-oss-20b"
     llm_enabled: str = "auto"  # auto | on | off
 
     sample_rate: int = 8000

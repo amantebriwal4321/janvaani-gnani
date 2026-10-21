@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.translit import latin_words
+
 # Native digits → ASCII so ages and acres survive Devanagari, Kannada, Telugu, Tamil, Bengali, Malayalam.
 _DIGIT_SRC = "०१२३४५६७८९೦೧೨೩೪೫೬೭೮೯౦౧౨౩౪౫౬౭౮౯௦௧௨௩௪௫௬௭௮௯০১২৩৪৫৬৭৮৯൦൧൨൩൪൫൬൭൮൯"
 _DIGIT_DST = "0123456789" * 6
@@ -235,6 +237,34 @@ _add_districts("GJ", ["Rajkot", "Bhavnagar", "Junagadh"])
 _add_districts("OD", ["Cuttack", "Berhampur", "Sambalpur"])
 _add_districts("MP", ["Indore", "Ujjain", "Satna", "Rewa"])
 _add_districts("AS", ["Dibrugarh", "Silchar"])
+_add_districts(
+    "JH",
+    [
+        "Pakur",
+        "Ranchi",
+        "Dhanbad",
+        "Bokaro",
+        "Dumka",
+        "Deoghar",
+        "Jamtara",
+        "Godda",
+        "Sahebganj",
+        "Giridih",
+        "Hazaribagh",
+        "Jamshedpur",
+        "Chatra",
+        "Koderma",
+        "Ramgarh",
+        "Palamu",
+        "Garhwa",
+        "Latehar",
+        "Lohardaga",
+        "Gumla",
+        "Simdega",
+        "Khunti",
+        "Chaibasa",
+    ],
+)
 
 # Spoken aliases and native-script names display in portal English on the slip.
 DISTRICTS["mysore"] = ("Mysuru", "KA")
@@ -243,6 +273,10 @@ DISTRICTS["ಮೈಸೂರು"] = ("Mysuru", "KA")
 DISTRICTS["ಮೈಸೂರ"] = ("Mysuru", "KA")
 DISTRICTS["ಕೋಲಾರ"] = ("Kolar", "KA")
 DISTRICTS["నిజామాబాద్"] = ("Nizamabad", "TG")
+DISTRICTS["पाकुड़"] = ("Pakur", "JH")
+DISTRICTS["পাকুড়"] = ("Pakur", "JH")
+DISTRICTS["बाँकुड़ा"] = ("Bankura", "WB")
+DISTRICTS["বাঁকুড়া"] = ("Bankura", "WB")
 
 STATE_WORDS = {
     "karnataka": "KA",
@@ -273,7 +307,22 @@ STATE_WORDS = {
     "haryana": "HR",
     "delhi": "DL",
     "jharkhand": "JH",
+    "jharakhand": "JH",
+    "झारखंड": "JH",
+    "झारखण्ड": "JH",
     "chhattisgarh": "CT",
+    "छत्तीसगढ़": "CT",
+    "बिहार": "BR",
+    "राजस्थान": "RJ",
+    "गुजरात": "GJ",
+    "ओडिशा": "OD",
+    "पंजाब": "PB",
+    "हरियाणा": "HR",
+    "दिल्ली": "DL",
+    "असम": "AS",
+    "केरल": "KL",
+    "ঝাড়খণ্ড": "JH",
+    "পশ্চিমবঙ্গ": "WB",
 }
 
 OCCUPATIONS = (
@@ -350,6 +399,264 @@ class Extraction:
     language: str | None
     ignored_id_number: bool
     switched_to: str | None
+    guesses: dict | None = None
+
+
+_PLACE_STOP = {
+    "main",
+    "mein",
+    "me",
+    "ke",
+    "ki",
+    "ka",
+    "se",
+    "hun",
+    "hoon",
+    "ho",
+    "hu",
+    "hai",
+    "jo",
+    "aur",
+    "and",
+    "the",
+    "from",
+    "am",
+    "is",
+    "my",
+    "rajy",
+    "rajya",
+    "state",
+    "district",
+    "zila",
+    "jila",
+    "jela",
+    "wala",
+    "wali",
+    "haan",
+    "han",
+    "nahi",
+    "nahin",
+    "yeah",
+    "yep",
+    "nope",
+    "yes",
+    "pakka",
+    "pucca",
+    "kutcha",
+    "kachcha",
+    "kaccha",
+    "ghar",
+    "house",
+    "saal",
+    "umar",
+    "acre",
+    "ekar",
+}
+
+
+def _fold_latin(word: str) -> str:
+    return re.sub(r"[^a-z]", "", word.lower())
+
+
+def _skeleton(word: str) -> str:
+    return re.sub(r"[aeiou]", "", _fold_latin(word))
+
+
+def _lev(left: str, right: str) -> int:
+    if abs(len(left) - len(right)) > 2:
+        return 9
+    prev = list(range(len(right) + 1))
+    for i, ca in enumerate(left, 1):
+        cur = [i]
+        for j, cb in enumerate(right, 1):
+            cur.append(min(prev[j] + 1, cur[-1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _state_indexes() -> tuple[dict[str, str], dict[str, str]]:
+    exact: dict[str, str] = {}
+    for word, code in STATE_WORDS.items():
+        if re.search(r"[a-z]", word):
+            exact[_fold_latin(word)] = code
+    for code, name in STATES.items():
+        exact[_fold_latin(name)] = code
+    skeletons: dict[str, str] = {}
+    buckets: dict[str, set[str]] = {}
+    for word, code in exact.items():
+        buckets.setdefault(_skeleton(word), set()).add(code)
+    for skel, codes in buckets.items():
+        if len(codes) == 1 and len(skel) >= 4:
+            skeletons[skel] = next(iter(codes))
+    return exact, skeletons
+
+
+_STATE_EXACT, _STATE_SKEL = _state_indexes()
+_DISTRICT_FOLD: dict[str, tuple[str, str]] = {}
+for _key, (_label, _state) in DISTRICTS.items():
+    if re.search(r"[a-z]", _key):
+        _DISTRICT_FOLD[_fold_latin(_key)] = (_label, _state)
+
+
+def _script_state(text: str) -> str | None:
+    for word, code in sorted(STATE_WORDS.items(), key=lambda item: len(item[0]), reverse=True):
+        if re.search(r"[a-z]", word):
+            continue
+        if word in text:
+            return code
+    return None
+
+
+def _state_from_words(words: list[str]) -> str | None:
+    for word in words:
+        if word in _STATE_EXACT:
+            return _STATE_EXACT[word]
+        code = _STATE_SKEL.get(_skeleton(word))
+        if code and len(word) >= 5:
+            return code
+    return None
+
+
+def _script_district(text: str) -> tuple[str, str] | None:
+    for key, (label, state) in sorted(DISTRICTS.items(), key=lambda item: len(item[0]), reverse=True):
+        if re.search(r"[a-z]", key):
+            continue
+        if key in text:
+            return label, state
+    return None
+
+
+def _fuzzy_district(token: str, state: str | None, limit: int) -> tuple[str, str] | None:
+    best: list[tuple[int, str, str]] = []
+    for fold, (label, st) in _DISTRICT_FOLD.items():
+        if state and st != state:
+            continue
+        dist = _lev(token, fold)
+        if dist <= limit:
+            best.append((dist, label, st))
+    if not best:
+        return None
+    best.sort()
+    top = best[0][0]
+    labels = {label for dist, label, _st in best if dist == top}
+    if len(labels) != 1 or top == 0:
+        return None
+    return best[0][1], best[0][2]
+
+
+def resolve_place(original: str) -> tuple[dict, dict, dict]:
+    """Certain place fields, the heard snippet, and a district that still needs a yes.
+
+    An explicit state is kept even when the district belongs to another state.
+    A fuzzy district is only a guess: it does not fill the profile.
+    """
+    words = [word for word in latin_words(original) if word not in _PLACE_STOP]
+    state = _script_state(original) or _state_from_words(words)
+    values: dict = {}
+    heard: dict = {}
+    guesses: dict = {}
+    exact = _script_district(original)
+    if exact is None:
+        for word in words:
+            hit = _DISTRICT_FOLD.get(word)
+            if hit:
+                exact = hit
+                heard["district"] = word
+                break
+    if exact:
+        label, home = exact
+        values["district"] = label
+        heard.setdefault("district", label)
+        if state is None:
+            state = home
+    else:
+        limit = 2 if state else 1
+        for word in words:
+            if len(word) < 4 or _skeleton(word) in _STATE_SKEL:
+                continue
+            hit = _fuzzy_district(word, state, limit)
+            if hit:
+                guesses["district"] = hit[0]
+                guesses["district_state"] = hit[1]
+                heard["district"] = word
+                break
+    if state:
+        values["state"] = state
+        values["state_name"] = STATES[state]
+        heard.setdefault("state_name", STATES[state])
+    return values, heard, guesses
+
+
+def canonical_state(token: str) -> str | None:
+    raw = (token or "").strip()
+    if not raw:
+        return None
+    upper = raw.upper()
+    if upper in STATES:
+        return upper
+    script = _script_state(raw)
+    if script:
+        return script
+    folded = _fold_latin(to_latin_token(raw))
+    if folded in _STATE_EXACT:
+        return _STATE_EXACT[folded]
+    for word in latin_words(raw):
+        if word in _STATE_EXACT:
+            return _STATE_EXACT[word]
+        code = _STATE_SKEL.get(_skeleton(word))
+        if code and len(word) >= 5:
+            return code
+    return None
+
+
+def classify_place_token(token: str, state: str | None = None) -> tuple[str, str, str] | None:
+    """`exact` or `guess`, plus the district label and its home state code."""
+    pieces = [word for word in latin_words(token) if word not in _PLACE_STOP]
+    if not pieces:
+        folded = _fold_latin(to_latin_token(token))
+        pieces = [folded] if folded else []
+    for piece in pieces:
+        hit = _DISTRICT_FOLD.get(piece)
+        if hit:
+            return "exact", hit[0], hit[1]
+    limit = 2 if state else 1
+    for piece in pieces:
+        if len(piece) < 4 or _skeleton(piece) in _STATE_SKEL:
+            continue
+        fuzzy = _fuzzy_district(piece, state, limit)
+        if fuzzy:
+            return "guess", fuzzy[0], fuzzy[1]
+    return None
+
+
+def to_latin_token(token: str) -> str:
+    from app.translit import to_latin
+
+    return to_latin(token)
+
+
+_CAN_DO = re.compile(
+    r"क्या\s*क्या\s*कर|क्या\s*कर\s*सक|what can you|kya\s+kya\s+kar|kya\s+kar\s+sak|"
+    r"কি\s*করতে\s*পার|কী\s*করতে\s*পার",
+    re.I,
+)
+_YES = {"हाँ", "हां", "हा", "जी", "yes", "yeah", "yep", "haan", "han", "ha", "হ্যাঁ", "হ্যা", "আজ্ঞে"}
+_NO = {"नहीं", "नही", "ना", "no", "nahi", "nahin", "না", "নাহ"}
+
+
+def asks_capability(text: str) -> bool:
+    return _CAN_DO.search(text or "") is not None
+
+
+def yes_no(text: str) -> bool | None:
+    token = (text or "").strip().strip(".!?।").strip()
+    if not token or len(token.split()) > 3:
+        return None
+    if token in _YES or token.lower() in _YES:
+        return True
+    if token in _NO or token.lower() in _NO:
+        return False
+    return None
 
 
 def normalize_digits(text: str) -> str:
@@ -492,43 +799,11 @@ def extract(raw: str) -> Extraction:
         values[field] = value
         heard[field] = _snippet(text, start, end) or original[:80]
 
-    # Place.
-    district_hit = None
-    for key, (label, state) in sorted(DISTRICTS.items(), key=lambda item: len(item[0]), reverse=True):
-        if re.search(r"[a-z]", key):
-            match = re.search(rf"(?<![a-z]){re.escape(key)}(?![a-z])", text, re.I)
-        else:
-            index = text.find(key)
-            match = None
-            if index != -1:
-                put("district", label, index, index + len(key))
-                values["state"] = state
-                values["state_name"] = STATES[state]
-                heard["state_name"] = label
-                district_hit = True
-                break
-        if match:
-            put("district", label, match.start(), match.end())
-            values["state"] = state
-            values["state_name"] = STATES[state]
-            heard["state_name"] = match.group(0)
-            district_hit = True
-            break
-    if not district_hit:
-        for word, state in sorted(STATE_WORDS.items(), key=lambda item: len(item[0]), reverse=True):
-            if re.search(r"[a-z]", word):
-                match = re.search(rf"(?<![a-z]){re.escape(word)}(?![a-z])", text, re.I)
-                if match:
-                    values["state"] = state
-                    values["state_name"] = STATES[state]
-                    heard["state_name"] = match.group(0)
-                    break
-            elif word in text:
-                index = text.find(word)
-                values["state"] = state
-                values["state_name"] = STATES[state]
-                heard["state_name"] = word
-                break
+    # Place. Exact names fill the field. A near miss is only a guess.
+    place_values, place_heard, place_guesses = resolve_place(original)
+    for field, value in place_values.items():
+        values[field] = value
+        heard[field] = place_heard.get(field) or original[:80]
 
     for word in RURAL:
         if re.search(r"[a-z]", word):
@@ -690,4 +965,5 @@ def extract(raw: str) -> Extraction:
         language=detect_language(original),
         ignored_id_number=ignored,
         switched_to=detect_switch(original),
+        guesses=place_guesses or None,
     )
