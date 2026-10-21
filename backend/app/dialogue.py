@@ -107,6 +107,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "bn": "আরেকবার বলুন। একটা ছোট কথাই যথেষ্ট।",
         "ml": "ഒന്നുകൂടി പറയൂ. ഒരു ചെറിയ കാര്യം മതി.",
     },
+    "unclear_b": {
+        "hi": "कोई बात नहीं, मैं साथ हूँ। बस एक बात बता दीजिए।",
+        "hi-en": "Koi baat nahi, main saath hoon. Bas ek baat bata dijiye.",
+        "en": "That's all right, I'm with you. Tell me one small thing.",
+        "kn": "ಪರವಾಗಿಲ್ಲ, ನಾನು ಜೊತೆಯಲ್ಲಿದ್ದೇನೆ. ಒಂದು ಮಾತು ಹೇಳಿ.",
+        "te": "పరవాలేదు, నేను ఉన్నాను. ఒక్క మాట చెప్పండి.",
+        "ta": "பரவாயில்லை, நான் இருக்கிறேன். ஒரு செய்தி சொல்லுங்கள்.",
+        "mr": "काही हरकत नाही, मी आहे. एक गोष्ट सांगा.",
+        "bn": "কিছু যায় আসে না, আমি আছি। একটা কথা বলুন।",
+        "ml": "കുഴപ്പമില്ല, ഞാൻ കൂടെയുണ്ട്. ഒരു കാര്യം പറയൂ.",
+    },
+    "unclear_c": {
+        "hi": "मैंने वह पूरा नहीं समझा। एक छोटी सी बात और।",
+        "hi-en": "Maine woh poora nahi samjha. Ek chhoti si baat aur.",
+        "en": "I didn't catch all of that. One short answer is enough.",
+        "kn": "ಅದು ಪೂರ್ತಿ ಅರ್ಥವಾಗಲಿಲ್ಲ. ಇನ್ನೊಂದು ಚಿಕ್ಕ ಉತ್ತರ ಸಾಕು.",
+        "te": "అది పూర్తిగా అర్థం కాలేదు. ఒక చిన్న సమాధానం చాలు.",
+        "ta": "அது முழுதும் புரியவில்லை. ஒரு சிறிய பதில் போதும்.",
+        "mr": "ते पूर्ण कळले नाही. एक छोटे उत्तर पुरे.",
+        "bn": "পুরোটা বুঝিনি। একটা ছোট উত্তরই যথেষ্ট।",
+        "ml": "അത് മുഴുവൻ മനസ്സിലായില്ല. ഒരു ചെറിയ മറുപടി മതി.",
+    },
     "invite": {
         "hi": "और कुछ बताना हो तो बोलिए।",
         "hi-en": "Aur kuchh batana ho to boliye.",
@@ -479,6 +501,29 @@ def question_for(field: str | None, language: str) -> str:
     if not field:
         return ""
     return say(QUESTION_KEY.get(field, "invite"), language)
+
+
+# Spoken before a repeated question so the same ask is not identical twice in a row.
+LEADS = {
+    "hi": ("कोई बात नहीं। ", "मैं यहीं हूँ। ", "धीरे से बताइए। "),
+    "hi-en": ("Koi baat nahi. ", "Main yahin hoon. ", "Dheere se bataiye. "),
+    "en": ("That's all right. ", "I'm right here. ", "Tell me slowly. "),
+    "kn": ("ಪರವಾಗಿಲ್ಲ. ", "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ. ", "ನಿಧಾನವಾಗಿ ಹೇಳಿ. "),
+    "te": ("పరవాలేదు. ", "నేను ఇక్కడే ఉన్నాను. ", "మెల్లగా చెప్పండి. "),
+    "ta": ("பரவாயில்லை. ", "நான் இங்கே இருக்கிறேன். ", "மெதுவாகச் சொல்லுங்கள். "),
+    "mr": ("काही हरकत नाही. ", "मी इथे आहे. ", "हळू सांगा. "),
+    "bn": ("কিছু যায় আসে না। ", "আমি এখানে আছি। ", "ধীরে বলুন। "),
+    "ml": ("കുഴപ്പമില്ല. ", "ഞാൻ ഇവിടെയുണ്ട്. ", "പതുക്കെ പറയൂ. "),
+}
+
+
+def varied_question(field: str | None, language: str, variant: int = 0) -> str:
+    """The next missing field, with a different lead once it has been asked before."""
+    base = question_for(field, language)
+    if not base or variant <= 0:
+        return base
+    leads = LEADS.get(language) or LEADS["en"]
+    return leads[(variant - 1) % len(leads)] + base
 
 
 def strip_tags(text: str) -> str:

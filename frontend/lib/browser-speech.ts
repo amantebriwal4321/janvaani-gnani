@@ -25,6 +25,14 @@ export function recognitionLang(language: string): string {
   return RECOGNITION_LANG[language] || "hi-IN";
 }
 
+export function rankedVoice<T extends { name: string; lang: string }>(voices: T[], lang: string): T | null {
+  const want = (lang || "hi-IN").toLowerCase();
+  const prefix = want.slice(0, 2);
+  const exact = voices.filter((voice) => voice.lang.toLowerCase() === want);
+  const same = exact.length ? exact : voices.filter((voice) => voice.lang.toLowerCase().startsWith(prefix));
+  return same.find((voice) => /female|woman|natural/i.test(voice.name)) || same[0] || null;
+}
+
 /** Backup timer if the device voice never fires onend. Short, so a stall does not hold the turn. */
 export function deviceSpeechTimeout(text: string): number {
   const length = text.trim().length;

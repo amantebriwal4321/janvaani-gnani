@@ -6,6 +6,7 @@ import {
   HEALTH_KEEPALIVE_MS,
   HEALTH_RETRY_MS,
   deviceSpeechTimeout,
+  rankedVoice,
   recognitionLang,
 } from "./browser-speech";
 import { apiBase, wsBase } from "./endpoints";
@@ -137,9 +138,7 @@ function rememberVoices() {
 
 function pickVoice(lang: string): SpeechSynthesisVoice | null {
   const voices = voiceList.length ? voiceList : (window.speechSynthesis?.getVoices?.() ?? []);
-  const prefix = (lang || "hi-IN").slice(0, 2).toLowerCase();
-  const same = voices.filter((voice) => voice.lang.toLowerCase().startsWith(prefix));
-  return same.find((voice) => /female|woman|natural/i.test(voice.name)) || same[0] || null;
+  return rankedVoice(voices, lang);
 }
 
 type BrowserRecognition = {
@@ -181,6 +180,7 @@ export function useCall(language: string) {
   const [mic, setMic] = useState<MicAccess>("unknown");
   const [speechBlock, setSpeechBlock] = useState<string | null>(null);
   const [browserEar, setBrowserEar] = useState(false);
+  const [greetingWarm, setGreetingWarm] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const playerRef = useRef<Player | null>(null);
@@ -328,6 +328,47 @@ export function useCall(language: string) {
       gone = true;
     };
   }, [health?.speech, line]);
+
+  useEffect(() => {
+    if (line !== "ready" || health?.speech !== "gnani") {
+      setGreetingWarm(false);
+      return;
+    }
+    let gone = false;
+    const timer = window.setTimeout(() => {
+      const lang = !language || language === "auto" ? "hi" : language;
+      void fetch(`${apiBase()}/api/warm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language: lang }),
+      })
+        .then(async (response) => {
+          if (!response.ok) return;
+          const body = (await response.json()) as { warmed?: boolean };
+          if (!gone && body.warmed) setGreetingWarm(true);
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      gone = true;
+      window.clearTimeout(timer);
+    };
+  }, [health?.speech, language, line]);
+
+  useEffect(() => {
+    if (language !== "auto") return;
+    const detected = callState?.language;
+    const rec = recRef.current;
+    if (!detected || !rec) return;
+    const next = recognitionLang(detected);
+    if (rec.lang === next) return;
+    rec.lang = next;
+    try {
+      rec.stop();
+    } catch {
+      /* onend starts it again in the language just heard */
+    }
+  }, [callState?.language, language]);
 
   const stopAudio = useCallback(() => {
     playerRef.current?.stop();
@@ -823,6 +864,7 @@ export function useCall(language: string) {
     mic,
     speechBlock,
     browserEar,
+    greetingWarm,
     apiBase: apiBase(),
     start,
     enableMic,

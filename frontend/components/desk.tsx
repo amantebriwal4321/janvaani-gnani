@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Landing } from "@/components/landing";
 import { VoiceOrb } from "@/components/voice-orb";
 import { Button } from "@/components/ui/button";
-import { connectionLabel } from "@/lib/line-status";
+import { connectionLabel, wakeCaption } from "@/lib/line-status";
 import { LANGUAGES, PHRASES } from "@/lib/phrases";
 import { useCall, type SchemeMatch } from "@/lib/use-call";
 
@@ -153,9 +153,7 @@ export function Desk() {
               <p className="text-sm font-semibold text-[#8a4e12]">
                 {call.line === "down" ? "Still waking the line…" : "Waking up the line…"}
               </p>
-              <p className="mt-0.5 text-sm leading-relaxed text-[#5c5146]">
-                The voice server sleeps when nobody is calling. This page is waking it. Start talking turns on when the line answers.
-              </p>
+              <p className="mt-0.5 text-sm leading-relaxed text-[#5c5146]">{wakeCaption(call.wakeProgress, call.line)}</p>
             </div>
             <div className="w-full sm:w-48 sm:shrink-0">
               <div
@@ -183,6 +181,12 @@ export function Desk() {
               {call.speechBlock ? ` ${call.speechBlock}` : " Speech and synthesis stay off until a key is set: /api/stt and /api/tts return 409."}
             </p>
           </div>
+        </div>
+      ) : null}
+
+      {call.line === "ready" && call.phase === "idle" && call.greetingWarm ? (
+        <div className="border-b border-[#d7eadf] bg-[#eef6f1] px-4 py-2" role="status">
+          <p className="mx-auto max-w-6xl text-sm text-[#0e6b45]">Greeting is ready. The first hello should start quickly.</p>
         </div>
       ) : null}
 

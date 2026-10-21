@@ -14,13 +14,18 @@ class Settings(BaseSettings):
     gnani_base_url: str = "https://api.vachana.ai"
     gnani_tts_model: str = "timbre-v3.0"
     gnani_tts_voice: str = "Shivani"
+    # Optional Timbre voice used only when the reply language is English.
+    # Empty keeps GNANI_TTS_VOICE and sends language en-IN.
+    gnani_tts_voice_en: str = ""
     gnani_tts_speed: float = 0.92
 
-    # Evon is self-hosted and OpenAI-compatible. Point LLM_BASE_URL at it,
-    # or at any other /v1 chat-completions server. Empty disables the LLM.
-    llm_base_url: str = ""
+    # OpenAI-compatible chat. Default host is Groq. Auto mode calls Groq only
+    # when LLM_API_KEY is set, so an empty key stays on the deterministic flow.
+    # Any other base URL is used as-is (a self-hosted server may omit the key).
+    # LLM_ENABLED=off disables the model. Eligibility is never the model's.
+    llm_base_url: str = "https://api.groq.com/openai/v1"
     llm_api_key: str = ""
-    llm_model: str = "evon"
+    llm_model: str = "llama-3.1-8b-instant"
     llm_enabled: str = "auto"  # auto | on | off
 
     sample_rate: int = 8000
@@ -34,7 +39,14 @@ class Settings(BaseSettings):
         mode = (self.llm_enabled or "auto").strip().lower()
         if mode == "off":
             return False
-        return bool(self.llm_base_url.strip())
+        base = self.llm_base_url.strip()
+        if not base:
+            return False
+        if mode == "on":
+            return True
+        if "groq.com" in base.lower():
+            return bool(self.llm_api_key.strip())
+        return True
 
 
 settings = Settings()

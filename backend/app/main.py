@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from app.config import settings
-from app.languages import BIAS_WORDS
+from app.languages import BIAS_WORDS, LANGS
 from app.schemes import CATALOG
 from app.session import SESSIONS, CallSession
 from app.slip import build_pdf, render_pdf, slip_from_client
@@ -85,6 +85,22 @@ def share(session_id: str) -> Response:
     return Response(content=session.brain.snapshot()["share_text"], media_type="text/plain; charset=utf-8")
 
 
+@app.post("/api/warm")
+async def warm_greeting(body: dict | None = Body(default=None)) -> dict:
+    """Synthesize the greeting into the TTS cache so the first hello is not a cold Timbre call."""
+    body = body if isinstance(body, dict) else {}
+    language = str(body.get("language") or "hi")
+    if language in ("", "auto") or language not in LANGS:
+        language = "hi"
+    if not settings.gnani_on:
+        return {"warmed": False, "speech": "mock", "language": language}
+    from app.dialogue import say
+    from app.gnani import warm_tts
+
+    await warm_tts(say("greeting", language), language)
+    return {"warmed": True, "speech": "gnani", "language": language}
+
+
 @app.post("/api/stt")
 async def stt_clip(file: UploadFile = File(...), language: str = Form("hi")) -> dict:
     """Short clip (60 seconds or less) through Prisma REST. Mock mode does not invent a transcript."""
@@ -142,7 +158,11 @@ async def ws_call(ws: WebSocket) -> None:
                             session.play_demo(data.get("language") or "hi")
                         )
                 elif kind == "utterance":
-                    await session.on_text(data.get("text") or "", "text")
+                    await session.on_text(
+                        data.get("text") or "",
+                        "text",
+                        language_hint=data.get("language") if isinstance(data.get("language"), str) else None,
+                    )
                 elif kind == "barge_in":
                     await session.barge()
                 elif kind == "set_language":

@@ -80,7 +80,7 @@ class CallSession:
                     {"type": "error", "recoverable": True, "message": recover_message()}
                 )
 
-    async def on_text(self, text: str, source: str) -> None:
+    async def on_text(self, text: str, source: str, language_hint: str | None = None) -> None:
         text = (text or "").strip()
         if not text or self.closed:
             return
@@ -93,6 +93,8 @@ class CallSession:
             filler_task = asyncio.create_task(self._maybe_filler(turn_gen))
             try:
                 llm = LLMClient() if settings.llm_on else None
+                # Attribute, not a third argument: tests wrap utterance(text, llm).
+                self.brain.pending_language_hint = language_hint
                 result = await self.brain.utterance(text, llm)
             except Exception:
                 filler_task.cancel()
@@ -116,7 +118,7 @@ class CallSession:
             await self.barge()
             return
         if event.type == "transcript" and event.is_final and event.text:
-            await self.on_text(event.text, "stt")
+            await self.on_text(event.text, "stt", language_hint=event.language or None)
 
     async def on_pcm(self, pcm: bytes) -> None:
         if self.closed or not pcm:

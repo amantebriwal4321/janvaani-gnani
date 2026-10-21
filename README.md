@@ -58,7 +58,7 @@ The realtime socket sends `x-api-key-id`, `lang_code`, `x-sample-rate: 8000`, an
 
 Timbre’s REST body is `voice`, `model`, `language`, and `audio_config`. The response is the audio itself. `container: mulaw` is raw 8 kHz G.711.
 
-The dialogue model is optional. Set `LLM_BASE_URL` to an OpenAI-compatible endpoint (self-hosted Evon, or any other chat model). It may only fill empty profile fields.
+The dialogue model is optional and OpenAI-compatible. The default host is Groq (`https://api.groq.com/openai/v1`) with `llama-3.1-8b-instant`. It answers what the caller just said, then asks for the next empty field, and it may fill empty profile fields from a JSON object. Scheme eligibility stays in the rule engine. With no `LLM_API_KEY`, or if the call errors, the same form continues and the reprompt wording changes so the same line is not spoken twice. JanVaani does not call SLNG.
 
 ## Run locally
 
@@ -87,15 +87,20 @@ Copy `.env.example` to `.env`. Never commit `.env`. Put `GNANI_API_KEY` and `LLM
 | `GNANI_BASE_URL` | No | Default `https://api.vachana.ai` |
 | `GNANI_TTS_MODEL` | No | `timbre-v3.0` |
 | `GNANI_TTS_VOICE` | No | `Shivani` |
+| `GNANI_TTS_VOICE_EN` | No | Timbre voice used only for English replies. Empty keeps Shivani and sends `en-IN`. |
 | `GNANI_TTS_SPEED` | No | Stored only. The verified Timbre body does not send speed. |
-| `LLM_BASE_URL` | No | OpenAI-compatible base. Empty keeps the extractor alone. |
-| `LLM_API_KEY` | No | Bearer token for that endpoint |
-| `LLM_MODEL` | No | Default `evon` |
-| `LLM_ENABLED` | No | `auto`, `on`, or `off` |
+| `LLM_BASE_URL` | No | OpenAI-compatible base, including `/v1`. Default `https://api.groq.com/openai/v1`. Empty turns the model off. |
+| `LLM_API_KEY` | For Groq | Bearer token. Groq stays off until this is set. |
+| `LLM_MODEL` | No | Default `llama-3.1-8b-instant`. Any fast model id the host lists. |
+| `LLM_ENABLED` | No | `auto` (default), `on`, or `off`. |
 | `NEXT_PUBLIC_API_BASE` | On Vercel | HTTPS origin of the Render API, no trailing slash. Empty means same-origin. Inlined at build time. |
 | `NEXT_PUBLIC_WS_BASE` | On Vercel | WebSocket origin, for example `wss://janvaani-api.onrender.com`. Empty derives `ws`/`wss` from the API base, then same-origin. Inlined at build time. |
 
-Mock mode still completes a call, a scheme match, and a slip. With no Gnani key the desk listens with the browser’s speech recognition and speaks with the device voice, then sends each line as an utterance. The scheme flow does not need an LLM. Phrase chips and the type box work too. With a key, the same call uses Prisma and Timbre. `POST /api/stt` and `POST /api/tts` return 409 until the key is set, and the desk shows that message. The page waits up to 45 seconds for `/api/health` on a cold start and keeps pinging while it stays open.
+Mock mode still completes a call, a scheme match, and a slip. With no Gnani key the desk listens with the browser’s speech recognition and speaks with the device voice, then sends each line as an utterance. The scheme flow does not need an LLM. Phrase chips and the type box work too. With a key, the same call uses Prisma and Timbre. `POST /api/stt` and `POST /api/tts` return 409 until the key is set, and the desk shows that message.
+
+In auto mode each final transcript picks the reply language: Prisma’s language tag when it sends one, otherwise the script of the text. English uses `en-IN` for Timbre and an English device voice. A later utterance in another language switches the reply. Choosing a language on the desk locks it until the caller asks to switch.
+
+The page pings `/api/health` as soon as it loads, shows a progress bar for about half a minute, and keeps pinging while it stays open. **Start talking** stays off until that check returns. When speech is Gnani, the desk then asks `POST /api/warm` to prefetch the greeting so the first hello is already in the TTS cache. That request does not block the button.
 
 ## Deploy
 
@@ -107,13 +112,13 @@ The desk and the voice server ship separately. Pushes to `main` deploy the Next.
 
 1. In the Render dashboard, choose **New → Blueprint** and connect this repository. Render reads `render.yaml`.
 2. When it asks for secret env vars, set `GNANI_API_KEY` to the Gnani key. Leave it empty to run the whole call in mock mode. Do not commit the key.
-3. Leave `LLM_BASE_URL` and `LLM_API_KEY` empty unless you have an OpenAI-compatible endpoint. Eligibility does not use them.
+3. For spoken answers that follow what the caller actually said, set `LLM_API_KEY` to a Groq key (secret). Leave `LLM_BASE_URL` as `https://api.groq.com/openai/v1`, `LLM_MODEL` as `llama-3.1-8b-instant`, and `LLM_ENABLED` as `auto`. Do not add an SLNG variable. Eligibility does not use the model. Leave `LLM_API_KEY` empty to keep the varied deterministic lines.
 4. Apply the blueprint. The service builds from `backend/` with `pip install -r requirements.txt` and starts `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-5. Open `https://<your-service>.onrender.com/api/health`. `ok` is true, `schemes` is 19, and `speech` is `mock` or `gnani`.
+5. Open `https://<your-service>.onrender.com/api/health`. `ok` is true, `schemes` is 19, and `speech` is `gnani` once `GNANI_API_KEY` is set. `llm` stays `off` until `LLM_API_KEY` is set, then it shows the model id (`llama-3.1-8b-instant` unless you changed `LLM_MODEL`).
 
 Docker instead of the Blueprint: **New → Web Service**, environment **Docker**, root directory `backend`, Dockerfile `backend/Dockerfile`. Set the same env vars. Render injects `PORT`.
 
-The free instance sleeps after idle time. The desk pings `GET /api/health` as soon as the page loads, waits up to 45 seconds for that check, and shows **Waking up the line…** until it returns. **Start talking** stays off until the line is ready. While the page is open it pings again every 90 seconds so the instance does not go back to sleep. WebSockets are supported on this web service. Do not run the API as a background worker.
+The free instance sleeps after idle time. The desk pings `GET /api/health` as soon as the page loads, waits up to 45 seconds for that check, and shows **Waking up the line…** with a progress bar until it returns. **Start talking** stays off until the line is ready. While the page is open it pings again every 90 seconds so the instance does not go back to sleep. After the line is up it prefetches the greeting with `POST /api/warm`. WebSockets are supported on this web service. Do not run the API as a background worker.
 
 ### 2. Vercel (Next.js desk)
 
@@ -135,7 +140,13 @@ To point a phone number later, set the carrier’s media-stream URL to `wss://<r
 cd backend && ../.venv/bin/python -m pytest -q
 ```
 
-The suite covers the Kolar, Mysuru, Nizamabad, and Nagpur households, the rule that a model patch cannot overwrite an extracted field, ID-number stripping, the Gnani request shapes, a mock WebSocket call through to a PDF, a slip posted without a live session, the scripted demo household, filler acknowledgements, and sentence-sized speech.
+The suite covers the Kolar, Mysuru, Nizamabad, and Nagpur households, the rule that a model patch cannot overwrite an extracted field, ID-number stripping, varied reprompts, a Groq-compatible reply that falls back when the model errors, language tags including English, the Gnani request shapes, a mock WebSocket call through to a PDF, a slip posted without a live session, the scripted demo household, filler acknowledgements, and sentence-sized speech.
+
+The desk status checks (wake bar, English voice pick, browser recognition tags) run with:
+
+```bash
+node --experimental-strip-types tests/desk-status.test.ts
+```
 
 Live speech, when a key is in the environment:
 
@@ -161,7 +172,7 @@ Optional second beat: end the call, call again, tap **Mysuru tailor**. The reply
 - A funded Exotel or Twilio number. The adapters are ready.
 - Timbre voice cloning.
 - A check that Prisma accepts `indic-auto` on a live socket. The code sends it for Hinglish and auto. The October 2026 live check used `hi-IN`.
-- Evon itself. Point `LLM_BASE_URL` at a self-hosted OpenAI-compatible endpoint if you have one.
+- A bundled model. Point `LLM_BASE_URL` at Groq, or at any other OpenAI-compatible `/v1` chat server. Eligibility does not move with it.
 - Multi-instance memory. Restarting the API, or a new socket after the duration cap, starts a fresh call.
 
 Headphones help. The softphone uses echo cancellation and ignores a long transcript that only repeats the assistant’s last line, so a short “haan” still counts.
