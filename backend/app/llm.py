@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.config import settings
+from app.extract import classify_enum, strip_slot_punct
 from app.models import BOOL_FIELDS, ENUM_FIELDS, FLOAT_FIELDS, INT_FIELDS, PROFILE_FIELDS, Profile, STRING_FIELDS
 
 logger = logging.getLogger("janvaani.llm")
@@ -51,6 +52,7 @@ Return one JSON object and nothing else:
 How to speak:
 - Answer what the person actually just said, first, in one short sentence, in their language. If they asked something, answer that. If they only greeted you, greet them back. If you do not know, say so kindly in a few words.
 - If they ask what you can do, say in one sentence that you fill the scheme form and make a slip for the CSC. Then ask the next missing field.
+- A one-word answer is still an answer. खेती, किसान, kheti, kisan, farming, or farmer means occupation farmer. मजदूरी, mazdoori, or labour means labourer. दुकान, dukaan, or shop means street_vendor. Put that in fields.
 - If confirm_district is set, that district is only a guess. Ask whether that district is theirs. Do not ask which district and state.
 - Then ask for the next missing form field, in the same language. One question only.
 - Two short sentences at most. No lists, no markdown, nothing that is hard to say aloud.
@@ -142,11 +144,16 @@ def coerce_patch(data: dict) -> dict:
             except (TypeError, ValueError):
                 continue
         elif key in ENUM_FIELDS:
-            token = str(value).strip().lower()
+            token = strip_slot_punct(str(value)).lower()
             if token in ENUM_FIELDS[key]:
                 clean[key] = token
+            else:
+                mapped = classify_enum(key, str(value))
+                if mapped in ENUM_FIELDS[key]:
+                    clean[key] = mapped
         elif key in STRING_FIELDS:
-            token = str(value).strip()
+            mapped = classify_enum(key, str(value)) if key in {"crop", "artisan_trade"} else None
+            token = strip_slot_punct(str(mapped or value))
             if token and len(token) <= 80:
                 clean[key] = token
     return clean
@@ -320,6 +327,51 @@ class LLMClient:
     async def extract_gaps(self, text: str, profile: Profile) -> dict:
         turn = await self.complete_turn(text, profile, "hi", None, [], "", [])
         return turn.fields
+
+    async def extract_slot(self, text: str, field: str, language: str) -> dict:
+        """One field, after the rules missed it. Empty when the line is not an answer."""
+        payload = {
+            "temperature": 0,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Return one JSON object {\"fields\":{}}. "
+                        "The speaker was asked for one form field. "
+                        "If their words answer it, set only that field. "
+                        "If they do not answer it, return {\"fields\":{}}. "
+                        "occupation must be farmer, artisan, street_vendor, labourer, homemaker, student, salaried, or other. "
+                        "खेती, किसान, kheti, kisan, farming, farmer, ರೈತ, రైతు, விவசாயம், शेती, চাষ, കൃഷി = farmer. "
+                        "मजदूरी, mazdoori, labour, coolie, ಕೂಲಿ, కూలీ, கூலி, মজুরি = labourer. "
+                        "दुकान, dukaan, shop, thela = street_vendor. "
+                        "age, senior_age, and land_acres are numbers. "
+                        "Yes and हाँ are true. No and नहीं are false. "
+                        "Do not invent a value."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"language": language, "field": field, "speaker_said": text},
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+        content = await self._chat(payload)
+        try:
+            data = _parse_json(content or "")
+        except json.JSONDecodeError as exc:
+            _set_error(f"json parse: {exc}")
+            raise
+        raw = data.get("fields") if isinstance(data.get("fields"), dict) else {}
+        if field in data and field not in raw:
+            raw = {field: data[field]}
+        patch = coerce_patch(raw)
+        if field in patch:
+            _clear_error()
+            return {field: patch[field]}
+        return {}
 
     async def _chat(self, payload: dict) -> str:
         try:

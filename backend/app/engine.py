@@ -7,7 +7,17 @@ import uuid
 from dataclasses import dataclass
 
 from app.dialogue import describe_updates, district_spoken, led, mentions_district, say, strip_tags, varied_question
-from app.extract import STATES, asks_capability, canonical_state, classify_place_token, extract, polarity_for, yes_no
+from app.extract import (
+    STATES,
+    answer_pending,
+    asks_capability,
+    canonical_state,
+    classify_enum,
+    classify_place_token,
+    extract,
+    polarity_for,
+    yes_no,
+)
 from app.languages import app_language
 from app.llm import clip_reply, remember_failure, reply_matches_language
 from app.models import PROFILE_FIELDS, Profile
@@ -284,6 +294,7 @@ class Brain:
             if previous != value:
                 updated.append(field)
         self._apply_confirm(text, found, updated)
+        self._apply_pending_answer(text, updated)
 
         answer = polarity_for(self.pending, text)
         if (
@@ -333,6 +344,7 @@ class Brain:
                 spoken = ""
                 remember_failure(exc)
                 logger.warning("llm turn fell back: %s", exc.__class__.__name__)
+            await self._fill_slot_with_model(text, llm, self.pending, updated)
         else:
             self.llm_status = "off" if llm is None else self.llm_status
 
@@ -396,6 +408,40 @@ class Brain:
         self.last_reply = reply
         return TurnResult(reply=reply, tts=tts, language=self.language, snapshot=self.snapshot())
 
+    def _apply_pending_answer(self, text: str, updated: list[str]) -> None:
+        """The words they just said, read as the answer to the question we asked."""
+        field = self.pending
+        if not field or field not in PROFILE_FIELDS or field in self.skipped:
+            return
+        if getattr(self.profile, field) is not None:
+            return
+        value = answer_pending(field, text)
+        if value is None:
+            return
+        setattr(self.profile, field, value)
+        self.heard[field] = text[:80]
+        updated.append(field)
+
+    async def _fill_slot_with_model(self, text: str, llm, field: str | None, updated: list[str]) -> None:
+        """Rules missed the slot. Ask the model for that field before the re-ask."""
+        if self.llm_status == "fallback" or llm is None or not hasattr(llm, "extract_slot"):
+            return
+        if not field or field not in PROFILE_FIELDS or field in self.skipped:
+            return
+        if getattr(self.profile, field) is not None:
+            return
+        try:
+            extra = await llm.extract_slot(text=text, field=field, language=self.language)
+        except Exception as exc:
+            remember_failure(exc)
+            logger.warning("llm slot extract fell back: %s", exc.__class__.__name__)
+            return
+        extra = self._canonicalize_model_fields(extra or {})
+        for key, value in gaps_only(self.profile, extra).items():
+            setattr(self.profile, key, value)
+            self.heard[key] = text[:80]
+            updated.append(key)
+
     def _apply_confirm(self, text: str, found, updated: list[str]) -> None:
         """A yes commits the guessed district. A new exact district replaces it."""
         if "district" in found.values or self.profile.district:
@@ -430,7 +476,16 @@ class Brain:
 
     def _canonicalize_model_fields(self, fields: dict) -> dict:
         """An exact district is written. A near miss becomes a confirm, not a silent fill."""
-        clean = dict(fields)
+        clean = {}
+        for key, value in dict(fields).items():
+            if key in {"occupation", "gender", "area", "ration", "housing", "category", "crop", "artisan_trade"}:
+                mapped = classify_enum(key, str(value))
+                if mapped is not None:
+                    clean[key] = mapped
+                elif key in {"crop", "artisan_trade"}:
+                    clean[key] = value
+            else:
+                clean[key] = value
         state_token = clean.get("state") or clean.get("state_name")
         if state_token:
             code = canonical_state(str(state_token))
