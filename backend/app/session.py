@@ -49,6 +49,7 @@ class CallSession:
                 "sessionId": self.brain.session_id,
                 "ref": self.brain.ref,
                 "mode": "gnani" if settings.gnani_on else "mock",
+                "listen": "gnani" if settings.gnani_on else "browser",
                 "language": self.brain.language,
                 "sampleRate": 8000,
                 "demo": self.demo,
@@ -125,6 +126,8 @@ class CallSession:
                 await self._stt.send_pcm(pcm)
             except Exception:
                 pass
+        # No Gnani key: Prisma never starts, so these frames are not a transcript.
+        # The browser sends the words as an utterance instead.
         # The browser decides its own barge-in. A phone line has no client VAD,
         # so sustained inbound energy while we are talking clears playback.
         if self.transport.name != "web" and self.speaking and pcm16_rms(pcm) > 1400:

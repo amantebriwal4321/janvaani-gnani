@@ -9,12 +9,14 @@ export function Landing({
   onStart,
   onDemo,
   speech,
+  canStart,
 }: {
   language: string;
   onLanguage: (id: string) => void;
   onStart: () => void;
   onDemo: () => void;
   speech: "gnani" | "mock" | null;
+  canStart: boolean;
 }) {
   return (
     <section className="mx-auto max-w-6xl px-4 pb-6 pt-8 sm:px-6 sm:pt-14">
@@ -30,17 +32,21 @@ export function Landing({
           A citizen talks. JanVaani fills the scheme form, checks 19 government schemes, and prints a CSC Ready Slip with a QR code.
         </p>
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <button type="button" className="cta" onClick={onStart}>
+          <button type="button" className="cta" onClick={onStart} disabled={!canStart}>
             Start talking
           </button>
-          <button type="button" className="cta cta-quiet" onClick={onDemo}>
+          <button type="button" className="cta cta-quiet" onClick={onDemo} disabled={!canStart}>
             Play 60-second demo
           </button>
         </div>
         <p className="mt-5 text-sm font-semibold tracking-wide text-[#0e6b45]">
           Powered by Gnani.ai
           <span className="ml-2 font-normal text-[#5c5146]">
-            {speech === "gnani" ? "Prisma listens · Timbre speaks · voice Shivani" : "Prisma STT · Timbre TTS · Shivani"}
+            {speech === "gnani"
+              ? "Prisma listens · Timbre speaks · voice Shivani"
+              : speech === "mock"
+                ? "Browser listens · device voice · mock mode"
+                : "Prisma STT · Timbre TTS · Shivani"}
           </span>
         </p>
       </div>

@@ -95,7 +95,7 @@ Copy `.env.example` to `.env`. Never commit `.env`. Put `GNANI_API_KEY` and `LLM
 | `NEXT_PUBLIC_API_BASE` | On Vercel | HTTPS origin of the Render API, no trailing slash. Empty means same-origin. Inlined at build time. |
 | `NEXT_PUBLIC_WS_BASE` | On Vercel | WebSocket origin, for example `wss://janvaani-api.onrender.com`. Empty derives `ws`/`wss` from the API base, then same-origin. Inlined at build time. |
 
-Mock mode still completes a call, a scheme match, and a slip. Spoken replies use the device voice, and the microphone is for barge-in only. Phrase chips and the type box supply the words. With a key, the same call uses Prisma and Timbre. `POST /api/stt` and `POST /api/tts` return 409 until the key is set.
+Mock mode still completes a call, a scheme match, and a slip. With no Gnani key the desk listens with the browser’s speech recognition and speaks with the device voice, then sends each line as an utterance. The scheme flow does not need an LLM. Phrase chips and the type box work too. With a key, the same call uses Prisma and Timbre. `POST /api/stt` and `POST /api/tts` return 409 until the key is set, and the desk shows that message. The page waits up to 45 seconds for `/api/health` on a cold start and keeps pinging while it stays open.
 
 ## Deploy
 
@@ -113,7 +113,7 @@ The desk and the voice server ship separately. Pushes to `main` deploy the Next.
 
 Docker instead of the Blueprint: **New → Web Service**, environment **Docker**, root directory `backend`, Dockerfile `backend/Dockerfile`. Set the same env vars. Render injects `PORT`.
 
-The free instance sleeps after idle time. The desk pings `GET /api/health` as soon as the page loads and shows **Waking up the line…** with a progress bar until that check returns. The first request can take about half a minute; a call connects once the service is awake. WebSockets are supported on this web service. Do not run the API as a background worker.
+The free instance sleeps after idle time. The desk pings `GET /api/health` as soon as the page loads, waits up to 45 seconds for that check, and shows **Waking up the line…** until it returns. **Start talking** stays off until the line is ready. While the page is open it pings again every 90 seconds so the instance does not go back to sleep. WebSockets are supported on this web service. Do not run the API as a background worker.
 
 ### 2. Vercel (Next.js desk)
 
