@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 
-from app.dialogue import describe_updates, say, strip_tags, varied_question
-from app.extract import extract, polarity_for
+from app.dialogue import describe_updates, district_spoken, led, mentions_district, say, strip_tags, varied_question
+from app.extract import STATES, asks_capability, canonical_state, classify_place_token, extract, polarity_for, yes_no
 from app.languages import app_language
-from app.llm import clip_reply, reply_matches_language
+from app.llm import clip_reply, remember_failure, reply_matches_language
 from app.models import PROFILE_FIELDS, Profile
+
+logger = logging.getLogger("janvaani.engine")
 from app.schemes import (
     csc_text,
     documents_for,
@@ -160,10 +163,6 @@ def _same_line(left: str, right: str) -> bool:
     return " ".join((left or "").split()) == " ".join((right or "").split())
 
 
-def _reached(matches) -> frozenset:
-    return frozenset(item.scheme_id for item in matches if item.status in ("qualify", "likely"))
-
-
 def _upcoming(profile: Profile) -> list[str]:
     names: list[str] = []
     for field in _ASK_ORDER:
@@ -207,6 +206,9 @@ class Brain:
         self.last_reply = ""
         self.ask_counts: dict[str, int] = {}
         self.pending_language_hint: str | None = None
+        self.confirm_district: str | None = None
+        self.confirm_state: str | None = None
+        self.skipped: set[str] = set()
 
     def set_language(self, code: str) -> None:
         if code in ("", "auto", None):
@@ -274,24 +276,35 @@ class Brain:
 
         updated: list[str] = []
         for field, value in found.values.items():
-            if field not in PROFILE_FIELDS:
+            if field not in PROFILE_FIELDS or field in self.skipped:
                 continue
+            previous = getattr(self.profile, field)
             setattr(self.profile, field, value)
             self.heard[field] = found.heard.get(field, text[:80])
-            updated.append(field)
+            if previous != value:
+                updated.append(field)
+        self._apply_confirm(text, found, updated)
 
         answer = polarity_for(self.pending, text)
-        if answer is not None and self.pending and self.pending in PROFILE_FIELDS:
+        if (
+            answer is not None
+            and self.pending
+            and self.pending in PROFILE_FIELDS
+            and self.pending not in self.skipped
+            and not (self.confirm_district and self.pending == "district")
+        ):
             setattr(self.profile, self.pending, answer)
             self.heard[self.pending] = text[:80]
             if self.pending not in updated:
                 updated.append(self.pending)
 
         matches_now = match_all(self.profile)
-        reached_before = _reached(matches_now)
-        pending_hint = next_field(self.profile, matches_now)
+        pending_hint = next_field(self.profile, matches_now, skip=self.skipped)
+        if self.confirm_district and self.profile.district is None and "district" not in self.skipped:
+            pending_hint = "district"
         scheme_names = [spoken_name(item, self.language) for item in matches_now if item.status in ("qualify", "likely")][:3]
         spoken = ""
+        model_fields: dict = {}
         if llm is not None and not found.ignored_id_number:
             try:
                 turn = await llm.complete_turn(
@@ -302,39 +315,71 @@ class Brain:
                     upcoming=_upcoming(self.profile),
                     last_reply=self.last_reply,
                     scheme_names=scheme_names,
+                    confirm_district=self.confirm_district or "",
                 )
-                for field, value in gaps_only(self.profile, turn.fields).items():
+                model_fields = self._canonicalize_model_fields(turn.fields)
+                for field, value in gaps_only(self.profile, model_fields).items():
                     setattr(self.profile, field, value)
                     self.heard[field] = text[:80]
                     updated.append(field)
                 spoken = (turn.reply or "").strip()
-                self.llm_status = "used"
-            except Exception:
+                if spoken or model_fields:
+                    self.llm_status = "used"
+                else:
+                    self.llm_status = "fallback"
+                    logger.warning("llm returned an empty reply and no fields")
+            except Exception as exc:
                 self.llm_status = "fallback"
                 spoken = ""
+                remember_failure(exc)
+                logger.warning("llm turn fell back: %s", exc.__class__.__name__)
         else:
             self.llm_status = "off" if llm is None else self.llm_status
 
+        if self.profile.district:
+            self.confirm_district = None
+            self.confirm_state = None
+
         self.user_turns += 1
         matches = match_all(self.profile)
-        self.pending = next_field(self.profile, matches)
         level = slip_level(self.profile, matches)
+        self.pending = next_field(self.profile, matches, skip=self.skipped)
+        if self.confirm_district and self.profile.district is None and "district" not in self.skipped:
+            self.pending = "district"
         if updated:
             self.ask_counts.clear()
         elif self.pending:
             self.ask_counts[self.pending] = self.ask_counts.get(self.pending, 0) + 1
-        variant = 0 if updated or not self.pending else max(0, self.ask_counts[self.pending] - 1)
+            if self.ask_counts[self.pending] > 2:
+                self.skipped.add(self.pending)
+                if self.pending == "district":
+                    self.confirm_district = None
+                    self.confirm_state = None
+                self.pending = next_field(self.profile, matches, skip=self.skipped)
+                if self.pending:
+                    self.ask_counts[self.pending] = 1
+        variant = 0 if updated or not self.pending else max(0, self.ask_counts.get(self.pending, 1) - 1)
+        capability = asks_capability(text)
         display, tts = self._compose(
-            updated, matches, level, found.ignored_id_number, bool(found.switched_to), variant
+            updated,
+            matches,
+            level,
+            found.ignored_id_number,
+            bool(found.switched_to),
+            variant,
+            capability,
         )
 
-        # New facts keep the rule engine's wording, so a scheme line cannot drift.
-        # An unrelated line uses the model, then a varied fallback if that fails.
-        use_model = bool(spoken) and not updated and reply_matches_language(spoken, self.language)
-        if use_model and _reached(matches) != reached_before:
-            use_model = False
-        if use_model and self.pending and "?" not in spoken and "？" not in spoken:
-            question = varied_question(self.pending, self.language, variant)
+        # Speak the model whenever the line is usable, including after a field
+        # was filled. Eligibility text still comes from the rule engine only
+        # when the model line is in the wrong language or repeats the last one.
+        use_model = bool(spoken) and reply_matches_language(spoken, self.language) and not _same_line(spoken, self.last_reply)
+        if use_model and self.confirm_district and not mentions_district(spoken, self.confirm_district, self.language):
+            question = self._question(0)
+            if question and question not in spoken:
+                spoken = clip_reply(f"{spoken.rstrip()} {question}")
+        elif use_model and self.pending and "?" not in spoken and "？" not in spoken:
+            question = self._question(variant)
             if question and question not in spoken:
                 spoken = clip_reply(f"{spoken.rstrip()} {question}")
         if use_model:
@@ -351,18 +396,101 @@ class Brain:
         self.last_reply = reply
         return TurnResult(reply=reply, tts=tts, language=self.language, snapshot=self.snapshot())
 
+    def _apply_confirm(self, text: str, found, updated: list[str]) -> None:
+        """A yes commits the guessed district. A new exact district replaces it."""
+        if "district" in found.values or self.profile.district:
+            self.confirm_district = None
+            self.confirm_state = None
+        elif self.confirm_district and "district" not in self.skipped:
+            answer = yes_no(text)
+            if answer is True:
+                self.profile.district = self.confirm_district
+                self.heard["district"] = text[:80]
+                if self.profile.state is None and self.confirm_state:
+                    self.profile.state = self.confirm_state
+                    self.profile.state_name = STATES.get(self.confirm_state)
+                    self.heard["state_name"] = self.profile.state_name or self.confirm_state
+                    updated.append("state")
+                    updated.append("state_name")
+                updated.append("district")
+                self.confirm_district = None
+                self.confirm_state = None
+            elif answer is False and not found.values:
+                self.confirm_district = None
+                self.confirm_state = None
+        guesses = found.guesses or {}
+        if (
+            self.profile.district is None
+            and self.confirm_district is None
+            and guesses.get("district")
+            and "district" not in self.skipped
+        ):
+            self.confirm_district = guesses["district"]
+            self.confirm_state = guesses.get("district_state")
+
+    def _canonicalize_model_fields(self, fields: dict) -> dict:
+        """An exact district is written. A near miss becomes a confirm, not a silent fill."""
+        clean = dict(fields)
+        state_token = clean.get("state") or clean.get("state_name")
+        if state_token:
+            code = canonical_state(str(state_token))
+            if code:
+                clean["state"] = code
+                clean["state_name"] = STATES[code]
+            else:
+                clean.pop("state", None)
+                clean.pop("state_name", None)
+        if "district" not in clean:
+            return clean
+        kind = classify_place_token(str(clean["district"]), clean.get("state") or self.profile.state)
+        if kind is None:
+            clean.pop("district", None)
+            return clean
+        if kind[0] == "guess":
+            clean.pop("district", None)
+            if self.profile.district is None and "district" not in self.skipped:
+                self.confirm_district = kind[1]
+                self.confirm_state = kind[2]
+            return clean
+        clean["district"] = kind[1]
+        if self.profile.state is None and "state" not in clean:
+            clean["state"] = kind[2]
+            clean["state_name"] = STATES[kind[2]]
+        return clean
+
+    def _question(self, variant: int) -> str:
+        if self.confirm_district and self.profile.district is None and "district" not in self.skipped:
+            base = say(
+                "confirm_district",
+                self.language,
+                district=district_spoken(self.confirm_district, self.language),
+            )
+            return led(base, self.language, variant)
+        if self.pending == "district" and self.profile.state:
+            return led(say("ask_district", self.language), self.language, variant)
+        return varied_question(self.pending, self.language, variant)
+
     def _avoid_repeat(self, current: str, variant: int) -> str:
         unclear_key = ("unclear_b", "unclear_c", "unclear")[variant % 3]
-        if self.pending:
-            line = f"{say(unclear_key, self.language)} {varied_question(self.pending, self.language, variant + 1)}"
+        if self.pending or self.confirm_district:
+            line = f"{say(unclear_key, self.language)} {self._question(variant + 1)}"
         else:
             line = say("invite", self.language)
         cleaned = strip_tags(line)
         if _same_line(cleaned, current) or _same_line(cleaned, self.last_reply):
-            cleaned = strip_tags(f"{say('ack', self.language)} {varied_question(self.pending, self.language, variant + 2)}")
+            cleaned = strip_tags(f"{say('ack', self.language)} {self._question(variant + 2)}")
         return cleaned
 
-    def _compose(self, updated, matches, level, ignored: bool, switched: bool, variant: int = 0) -> tuple[str, str]:
+    def _compose(
+        self,
+        updated,
+        matches,
+        level,
+        ignored: bool,
+        switched: bool,
+        variant: int = 0,
+        capability: bool = False,
+    ) -> tuple[str, str]:
         lang = self.language
         parts: list[str] = []
         if ignored:
@@ -382,7 +510,10 @@ class Brain:
         if fresh and good:
             parts.append(say("schemes_line", lang, schemes=scheme_text))
         if not updated and not switched and not ignored:
-            parts.append(say(("unclear", "unclear_b", "unclear_c")[variant % 3], lang))
+            if capability:
+                parts.append(say("can_do", lang))
+            else:
+                parts.append(say(("unclear", "unclear_b", "unclear_c")[variant % 3], lang))
         elif updated and not facts and not switched:
             parts.append(say("ack", lang))
 
@@ -394,8 +525,8 @@ class Brain:
                 parts.append(say("fix_mobile", lang))
             if self.profile.bank_account is False:
                 parts.append(say("fix_bank", lang))
-        elif self.pending:
-            parts.append(varied_question(self.pending, lang, variant))
+        elif self.pending or self.confirm_district:
+            parts.append(self._question(variant))
         else:
             parts.append(say("invite", lang))
 

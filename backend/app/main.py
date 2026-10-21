@@ -11,6 +11,7 @@ from fastapi.responses import Response
 
 from app.config import settings
 from app.languages import BIAS_WORDS, LANGS
+from app.llm import llm_health
 from app.schemes import CATALOG
 from app.session import SESSIONS, CallSession
 from app.slip import build_pdf, render_pdf, slip_from_client
@@ -27,13 +28,16 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health() -> dict:
+    report = llm_health()
     return {
         "ok": True,
         "speech": "gnani" if settings.gnani_on else "mock",
         "stt": "gnani-prisma-v2.5",
         "tts": settings.gnani_tts_model,
         "voice": settings.gnani_tts_voice,
-        "llm": settings.llm_model if settings.llm_on else "off",
+        "llm": report["model"] if settings.llm_on else "off",
+        "llm_error": report["error"],
+        "llm_notice": report["notice"],
         "sample_rate": settings.sample_rate,
         "schemes": len(CATALOG),
         "bias_words": len(BIAS_WORDS),

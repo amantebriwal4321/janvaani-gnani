@@ -18,7 +18,7 @@ import websockets
 
 from app.audio import FRAME_BYTES, downsample_pcm16
 from app.config import settings
-from app.languages import STT_CODE, TTS_CODE
+from app.languages import BIAS_WORDS, STT_CODE, TTS_CODE
 
 FRAME_INTERVAL = 0.064  # 512 samples at 8 kHz
 
@@ -59,12 +59,18 @@ def stt_form(language: str, locked: bool = True) -> dict[str, str]:
 
 
 def stt_ws_headers(lang_code: str) -> dict[str, str]:
-    """Headers from the socket that transcribed 8 kHz audio."""
+    """Headers from the socket that transcribed 8 kHz audio, plus a place bias.
+
+    Prisma applies x-bias-list only when x-bias-score is sent with it. The list
+    is letters-only single words; one bad entry drops the whole list.
+    """
     return {
         "x-api-key-id": settings.gnani_api_key,
         "lang_code": lang_code,
         "x-sample-rate": "8000",
         "x-min-silence-ms": "400",
+        "x-bias-list": json.dumps(list(BIAS_WORDS), ensure_ascii=True),
+        "x-bias-score": "1.0",
     }
 
 

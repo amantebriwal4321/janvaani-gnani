@@ -54,11 +54,11 @@ Caller numbers on a start event are discarded.
 
 Prisma STT accepts BCP-47 codes only (`hi-IN`, `kn-IN`, and the rest of the `-IN` set). It rejects `hi-en`. Hinglish and an unlocked auto call send `indic-auto`. A locked language uses its `-IN` code, and the socket reconnects when that code changes. Timbre may still be asked for `hi-en` when the reply itself is Hinglish.
 
-The realtime socket sends `x-api-key-id`, `lang_code`, `x-sample-rate: 8000`, and `x-min-silence-ms: 400`. Audio goes up as 1,024-byte frames, one every 64 ms. `speech_start` interrupts playback. A final `transcript` is the caller’s turn.
+The realtime socket sends `x-api-key-id`, `lang_code`, `x-sample-rate: 8000`, `x-min-silence-ms: 400`, and a letters-only `x-bias-list` of scheme and district names with `x-bias-score: 1.0`. Audio goes up as 1,024-byte frames, one every 64 ms. `speech_start` interrupts playback. A final `transcript` is the caller’s turn.
 
 Timbre’s REST body is `voice`, `model`, `language`, and `audio_config`. The response is the audio itself. `container: mulaw` is raw 8 kHz G.711.
 
-The dialogue model is optional and OpenAI-compatible. The default host is Groq (`https://api.groq.com/openai/v1`) with `llama-3.1-8b-instant`. It answers what the caller just said, then asks for the next empty field, and it may fill empty profile fields from a JSON object. Scheme eligibility stays in the rule engine. With no `LLM_API_KEY`, or if the call errors, the same form continues and the reprompt wording changes so the same line is not spoken twice. JanVaani does not call SLNG.
+The dialogue model is optional and OpenAI-compatible. The default host is Groq (`https://api.groq.com/openai/v1`) with `openai/gpt-oss-20b`. `llama-3.1-8b-instant` was shut down on Groq's free and developer tiers on 2026-08-16; if `LLM_MODEL` still names that id, the server tries `openai/gpt-oss-20b` once and keeps using it. The failure and the switch show up on `GET /api/health` as `llm_error` and `llm_notice`, and in the API log. The model answers what the caller just said, then asks for the next empty field, and it may fill empty profile fields from a JSON object. Scheme eligibility stays in the rule engine. With no `LLM_API_KEY`, or if the call errors, the same form continues: a place is still saved, a guessed district is confirmed, and a "what can you do" question gets a short answer instead of the same reprompt. A field that gets no answer twice is skipped. JanVaani does not call SLNG.
 
 ## Run locally
 
@@ -91,7 +91,7 @@ Copy `.env.example` to `.env`. Never commit `.env`. Put `GNANI_API_KEY` and `LLM
 | `GNANI_TTS_SPEED` | No | Stored only. The verified Timbre body does not send speed. |
 | `LLM_BASE_URL` | No | OpenAI-compatible base, including `/v1`. Default `https://api.groq.com/openai/v1`. Empty turns the model off. |
 | `LLM_API_KEY` | For Groq | Bearer token. Groq stays off until this is set. |
-| `LLM_MODEL` | No | Default `llama-3.1-8b-instant`. Any fast model id the host lists. |
+| `LLM_MODEL` | No | Default `openai/gpt-oss-20b`. Any fast model id the host lists. |
 | `LLM_ENABLED` | No | `auto` (default), `on`, or `off`. |
 | `NEXT_PUBLIC_API_BASE` | On Vercel | HTTPS origin of the Render API, no trailing slash. Empty means same-origin. Inlined at build time. |
 | `NEXT_PUBLIC_WS_BASE` | On Vercel | WebSocket origin, for example `wss://janvaani-api.onrender.com`. Empty derives `ws`/`wss` from the API base, then same-origin. Inlined at build time. |
@@ -112,9 +112,9 @@ The desk and the voice server ship separately. Pushes to `main` deploy the Next.
 
 1. In the Render dashboard, choose **New → Blueprint** and connect this repository. Render reads `render.yaml`.
 2. When it asks for secret env vars, set `GNANI_API_KEY` to the Gnani key. Leave it empty to run the whole call in mock mode. Do not commit the key.
-3. For spoken answers that follow what the caller actually said, set `LLM_API_KEY` to a Groq key (secret). Leave `LLM_BASE_URL` as `https://api.groq.com/openai/v1`, `LLM_MODEL` as `llama-3.1-8b-instant`, and `LLM_ENABLED` as `auto`. Do not add an SLNG variable. Eligibility does not use the model. Leave `LLM_API_KEY` empty to keep the varied deterministic lines.
+3. For spoken answers that follow what the caller actually said, set `LLM_API_KEY` to a Groq key (secret). Leave `LLM_BASE_URL` as `https://api.groq.com/openai/v1` and `LLM_ENABLED` as `auto`. Set `LLM_MODEL` to `openai/gpt-oss-20b`. Do not leave `llama-3.1-8b-instant`: Groq shut that model down on 2026-08-16, and every turn was falling back to the fixed line. The server retries `openai/gpt-oss-20b` if the configured id is rejected, then `/api/health` shows that model in `llm`, the rejection in `llm_notice`, and any later failure in `llm_error`. Do not add an SLNG variable. Eligibility does not use the model. Leave `LLM_API_KEY` empty to keep the varied deterministic lines.
 4. Apply the blueprint. The service builds from `backend/` with `pip install -r requirements.txt` and starts `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-5. Open `https://<your-service>.onrender.com/api/health`. `ok` is true, `schemes` is 19, and `speech` is `gnani` once `GNANI_API_KEY` is set. `llm` stays `off` until `LLM_API_KEY` is set, then it shows the model id (`llama-3.1-8b-instant` unless you changed `LLM_MODEL`).
+5. Open `https://<your-service>.onrender.com/api/health`. `ok` is true, `schemes` is 19, and `speech` is `gnani` once `GNANI_API_KEY` is set. `llm` stays `off` until `LLM_API_KEY` is set, then it shows the model id that actually answered (`openai/gpt-oss-20b` unless you changed `LLM_MODEL`). `llm_error` is empty after a good call. A rejected model leaves the reason in `llm_error` or `llm_notice`.
 
 Docker instead of the Blueprint: **New → Web Service**, environment **Docker**, root directory `backend`, Dockerfile `backend/Dockerfile`. Set the same env vars. Render injects `PORT`.
 

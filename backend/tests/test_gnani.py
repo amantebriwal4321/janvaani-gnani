@@ -1,6 +1,7 @@
 """Request shapes and Prisma messages. No network."""
 
 import asyncio
+import json
 import struct
 import time
 
@@ -73,10 +74,22 @@ def test_english_tts_voice_override(monkeypatch):
 
 def test_stt_websocket_headers_match_the_live_socket():
     headers = stt_ws_headers("hi-IN")
-    assert set(headers) == {"x-api-key-id", "lang_code", "x-sample-rate", "x-min-silence-ms"}
+    assert set(headers) == {
+        "x-api-key-id",
+        "lang_code",
+        "x-sample-rate",
+        "x-min-silence-ms",
+        "x-bias-list",
+        "x-bias-score",
+    }
     assert headers["lang_code"] == "hi-IN"
     assert headers["x-sample-rate"] == "8000"
     assert headers["x-min-silence-ms"] == "400"
+    assert headers["x-bias-score"] == "1.0"
+    words = json.loads(headers["x-bias-list"])
+    assert "Pakur" in words
+    assert "Jharkhand" in words
+    assert all(word.isalpha() and word.isascii() for word in words)
 
 
 def test_prisma_messages():
