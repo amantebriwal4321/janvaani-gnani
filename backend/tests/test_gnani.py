@@ -10,6 +10,7 @@ from app.gnani import (
     STTStream,
     parse_stt_message,
     parse_wav,
+    repair_wav,
     stt_code,
     stt_form,
     stt_ws_headers,
@@ -114,6 +115,37 @@ def test_prisma_messages():
         {"type": "transcript", "text": "ನಮಸ್ಕಾರ", "is_final": True, "metadata": {"detected_language": "kn-IN"}}
     )
     assert nested is not None and nested.language == "kn-IN"
+
+
+def test_timbre_streaming_wav_header_repairs_to_a_real_length():
+    """Timbre sets RIFF and data sizes to 0xFFFFFFFF. Readers must see the PCM."""
+    import io
+    import wave
+
+    pcm = b"\x01\x00" * 40
+    fmt = struct.pack("<HHIIHH", 1, 1, 8000, 16000, 2, 16)
+    broken = (
+        b"RIFF"
+        + b"\xff\xff\xff\xff"
+        + b"WAVE"
+        + b"fmt "
+        + struct.pack("<I", 16)
+        + fmt
+        + b"data"
+        + b"\xff\xff\xff\xff"
+        + pcm
+    )
+    audio, rate = parse_wav(broken)
+    assert audio == pcm
+    assert rate == 8000
+    fixed = repair_wav(broken)
+    assert fixed[4:8] != b"\xff\xff\xff\xff"
+    with wave.open(io.BytesIO(fixed), "rb") as handle:
+        assert handle.getframerate() == 8000
+        assert handle.getnframes() == 40
+        assert handle.readframes(handle.getnframes()) == pcm
+    normal = _wav(pcm, 8000)
+    assert repair_wav(normal) == normal
 
 
 def test_wav_strips_and_raw_mulaw_passes_through():

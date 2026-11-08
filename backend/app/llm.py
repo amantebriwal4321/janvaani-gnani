@@ -200,10 +200,25 @@ def remember_failure(exc: BaseException) -> None:
 
 def _scrub(text: str) -> str:
     cleaned = re.sub(r"Bearer\s+\S+", "Bearer [redacted]", text or "", flags=re.I)
+    # Groq 429 bodies include the organization id. /api/health is public.
+    cleaned = re.sub(r"org_[A-Za-z0-9]+", "[redacted]", cleaned)
     key = (settings.llm_api_key or "").strip()
     if key:
         cleaned = cleaned.replace(key, "[redacted]")
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def completion_limits(model: str) -> dict:
+    """Extra body fields for reasoning models. Other ids are left alone.
+
+    gpt-oss spends the completion budget on reasoning first. Groq's default
+    effort is medium, and a short JSON reply can come back empty or burn the
+    daily token cap. Low effort is enough for two spoken sentences.
+    """
+    name = (model or "").lower()
+    if "gpt-oss" not in name:
+        return {}
+    return {"reasoning_effort": "low", "max_completion_tokens": 700}
 
 
 def _set_error(text: str) -> None:
@@ -391,7 +406,7 @@ class LLMClient:
         if self.key:
             headers["Authorization"] = f"Bearer {self.key}"
         url = self.base + "/chat/completions"
-        body = {**payload, "model": model}
+        body = {**payload, "model": model, **completion_limits(model)}
         try:
             async with httpx.AsyncClient(timeout=12) as client:
                 response = await client.post(

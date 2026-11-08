@@ -2,6 +2,7 @@
 
 import json
 import re
+import zlib
 
 from fastapi.testclient import TestClient
 
@@ -25,6 +26,21 @@ KOLAR = (
 KAN = "ನಾನು ಮೈಸೂರಿನ ಹಳ್ಳಿಯಿಂದ. ನಾನು ದರ್ಜಿ. ವಯಸ್ಸು 38. ನಾನು ಹೆಂಗಸು."
 TEL = "నేను నిజామాబాద్ రైతు. 3 ఎకరాలు. వయసు 50."
 VENDOR = "Main Nagpur se hoon, thela lagata hoon, umar tees saal, mard hoon, BPL nahi hai, bank account nahi hai."
+
+
+def _pdf_text_starts_on_the_page(pdf: bytes) -> bool:
+    """Every text line starts in the left half of A4. A drifting cursor walks off the page."""
+    chunks = []
+    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf, re.S):
+        raw = match.group(1)
+        try:
+            raw = zlib.decompress(raw)
+        except zlib.error:
+            continue
+        chunks.append(raw)
+    body = b"\n".join(chunks)
+    xs = [float(item) for item in re.findall(rb"([\d.]+) [\d.]+ Td", body)]
+    return bool(xs) and max(xs) < 250
 
 
 def _ids(profile: Profile, status: str) -> set[str]:
@@ -89,6 +105,7 @@ def test_kolar_flow_reaches_a_ready_slip():
         pdf = build_pdf(brain)
         assert pdf.startswith(b"%PDF")
         assert len(pdf) > 1500
+        assert _pdf_text_starts_on_the_page(pdf)
 
     import asyncio
 

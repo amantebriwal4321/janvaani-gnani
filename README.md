@@ -56,9 +56,9 @@ Prisma STT accepts BCP-47 codes only (`hi-IN`, `kn-IN`, and the rest of the `-IN
 
 The realtime socket sends `x-api-key-id`, `lang_code`, `x-sample-rate: 8000`, `x-min-silence-ms: 400`, and a letters-only `x-bias-list` of scheme and district names with `x-bias-score: 1.0`. Audio goes up as 1,024-byte frames, one every 64 ms. `speech_start` interrupts playback. A final `transcript` is the caller’s turn.
 
-Timbre’s REST body is `voice`, `model`, `language`, and `audio_config`. The response is the audio itself. `container: mulaw` is raw 8 kHz G.711.
+Timbre’s REST body is `voice`, `model`, `language`, and `audio_config`. The response is the audio itself. `container: mulaw` is raw 8 kHz G.711. A live Timbre wav sets the RIFF size and the data chunk size to `0xFFFFFFFF`. `repair_wav` writes the real sizes before those bytes are cached or returned from `/api/tts`. The call socket already reads the PCM, with a chunk size past the buffer clamped to the bytes on hand. The Render process keeps returning the streaming header until it is redeployed.
 
-The dialogue model is optional and OpenAI-compatible. The default host is Groq (`https://api.groq.com/openai/v1`) with `openai/gpt-oss-20b`. `llama-3.1-8b-instant` was shut down on Groq's free and developer tiers on 2026-08-16; if `LLM_MODEL` still names that id, the server tries `openai/gpt-oss-20b` once and keeps using it. The failure and the switch show up on `GET /api/health` as `llm_error` and `llm_notice`, and in the API log. The model answers what the caller just said, then asks for the next empty field, and it may fill empty profile fields from a JSON object. Scheme eligibility stays in the rule engine. With no `LLM_API_KEY`, or if the call errors, the same form continues: a place is still saved, a guessed district is confirmed, and a "what can you do" question gets a short answer instead of the same reprompt. A field that gets no answer twice is skipped. JanVaani does not call SLNG.
+The dialogue model is optional and OpenAI-compatible. The default host is Groq (`https://api.groq.com/openai/v1`) with `openai/gpt-oss-20b`. Requests for a `gpt-oss` id send `reasoning_effort: low` and `max_completion_tokens: 700`, so a two-sentence JSON reply does not spend the whole completion budget on reasoning. Other model ids do not get those fields. A Groq 429 body can include an organization id. That id is stripped before `llm_error` is stored. `/api/health` is public. `llama-3.1-8b-instant` was shut down on Groq's free and developer tiers on 2026-08-16; if `LLM_MODEL` still names that id, the server tries `openai/gpt-oss-20b` once and keeps using it. The failure and the switch show up on `GET /api/health` as `llm_error` and `llm_notice`, and in the API log. The model answers what the caller just said, then asks for the next empty field, and it may fill empty profile fields from a JSON object. Scheme eligibility stays in the rule engine. With no `LLM_API_KEY`, or if the call errors, the same form continues: a place is still saved, a guessed district is confirmed, and a "what can you do" question gets a short answer instead of the same reprompt. A field that gets no answer twice is skipped. JanVaani does not call SLNG.
 
 ## Run locally
 
@@ -133,6 +133,30 @@ The free instance sleeps after idle time. The desk pings `GET /api/health` as so
 Same-origin fallback: if both public variables are empty, the browser calls the page’s own host (`/api` and `/ws`). Use that for the local `./dev.sh` desk and for `docker compose`. A Vercel deploy with both empty cannot reach Render.
 
 To point a phone number later, set the carrier’s media-stream URL to `wss://<render-host>/ws/telephony/twilio` or `.../exotel`. That still needs the carrier account. The browser demo does not.
+
+## Checked on the live desk, 8 Nov 2026
+
+One session against `https://janvaani-api-1eve.onrender.com` and the Vercel desk at `https://janvaani-gnani.vercel.app`. Not a benchmark. The Vercel host has no `/api/health`. The desk build points at that Render host.
+
+`GET /api/health` returned `speech: gnani`, `stt: gnani-prisma-v2.5`, `tts: timbre-v3.0`, voice Shivani, and 19 schemes. That means `GNANI_API_KEY` is set. It does not, by itself, prove Prisma answered.
+
+Hindi Timbre audio for "नमस्ते, मैं जनवाणी हूँ।" was an 8 kHz wav with speech in it, not silence. Prisma REST transcribed one pass as "नमस्ते मैं जनवाणी हूँ।" and a later pass as "नमस्ते, मैं जनवानी हूँ।" Kannada audio transcribed as "ನಮಸ್ಕಾರ ನಾನು ಜನವಾಣಿ" and, on another clip, "ನಮಸ್ಕಾರ ನಾನು ಜಯವಾಣಿ". One Kannada REST call returned HTTP 500. The next one returned a transcript. The name spelling moves. The greeting word did not.
+
+The call socket opened with `mode: gnani` and `listen: gnani`, Prisma `lang: hi-IN`. The same Hindi PCM, sent on that socket, came back as the user line "नमस्ते, मैं जनवाणी हूँ।" and a Hindi reply that asked for the district. The greeting audio was about 7 seconds and was not silence.
+
+A typed Kolar farmer line filled Kolar, Karnataka, farmer, 2 acres, tomato, age 45, BPL, and an elder aged 72. The rule engine listed PM-KISAN, PM Fasal Bima, Ayushman Bharat, Ayushman Vay Vandana, old-age pension, and e-Shram. The slip was `draft`. The next question was whether the names match. That turn's `llm` field was `fallback`. `/api/health` then showed HTTP 429, Groq tokens per day for `openai/gpt-oss-20b`, so the spoken line was the fixed Hindi one. No phone number, Aadhaar, or PAN was sent.
+
+The in-browser demo on the Vercel desk, same day, ran as Demo mode with the Shivani / Gnani badge. It filled Kolar, Karnataka, farmer, 2 acres, tomato, age 45, BPL, elder 72, and listed PM-KISAN, PM Fasal Bima, and Ayushman Bharat. The slip reference was JV-9A94. The PDF downloaded from that production server places later lines off the right edge, because each `multi_cell` left the cursor on the right. This branch sends the next line back to the left margin. That PDF fix is not on the live server until a redeploy.
+
+Repeat the speech check (it spends Gnani credits on the deployed key):
+
+```bash
+cd backend && ../.venv/bin/python scripts/probe_deployed.py
+```
+
+`speech: mock`, or HTTP 409 from `/api/tts`, means the key is absent. A transcript is printed only after Prisma returns one. `JANVAANI_API_BASE` overrides the host.
+
+Paste-ready form text and the unposted LinkedIn and X drafts are in `SUBMISSION.md`.
 
 ## Tests
 
