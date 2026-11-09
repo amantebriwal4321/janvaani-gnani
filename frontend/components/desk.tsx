@@ -123,7 +123,7 @@ export function Desk() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen overflow-x-clip">
       <header className="sticky top-0 z-30 border-b border-[#e4d7c4]/80 bg-[#f6f1e7]/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="min-w-0">
@@ -222,8 +222,8 @@ export function Desk() {
                     : PHASE_LINE[call.phase]}
                 </p>
               </div>
-              <p className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold tracking-wide">
-                {call.health?.speech === "gnani" ? `Shivani · Gnani` : "Practice voice"}
+              <p className="max-w-[9.5rem] rounded-full bg-white/10 px-3 py-1 text-center text-xs font-semibold leading-tight tracking-wide">
+                {call.health?.speech === "gnani" ? "Prisma STT · Timbre TTS" : "Practice voice"}
               </p>
             </div>
 
@@ -235,6 +235,16 @@ export function Desk() {
               {call.demo ? "Demo · Kolar farmer" : langLabel}
               {state?.language && language === "auto" ? " · detected" : ""}
             </p>
+            {call.health?.speech === "gnani" ? (
+              <p className="mt-1 text-center text-xs leading-relaxed text-[#e7c9a4]/80">
+                Prisma writes the words. Timbre speaks the reply. Voice Shivani.
+              </p>
+            ) : null}
+            {call.health?.llm_error?.includes("429") ? (
+              <p className="mt-2 text-center text-xs leading-relaxed text-[#f0ddb4]" role="status">
+                Phrasing is on the fixed lines. The optional model hit its daily limit. Scheme matches are unchanged.
+              </p>
+            ) : null}
 
             {call.phase === "speaking" ? (
               <button type="button" className="mt-3 h-12 w-full rounded-full bg-white/10 text-base font-semibold" onClick={call.barge}>

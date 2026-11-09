@@ -99,7 +99,9 @@ AGE_UNITS = r"saal|sal|varsh|varsha|years?|ವರ್ಷ|ఏళ్లు|ఏళ�
 AGE_CUES = r"umar|umra|umr|age|vayassu|vayasu|వయసు|వయస్సు|ವಯಸ್ಸು|வயது|उम्र|उमर|বয়স|പ്രായം|वय"
 
 KIN = re.compile(
-    r"pitaji|pitaaji|pita|papa|father|mataji|mummy|\bmaa\b|amma|mother|dadaji|dadi|pati\b|husband|wife|patni",
+    r"pitaji|pitaaji|pita|papa|father|mataji|mummy|\bmaa\b|amma|mother|dadaji|dadi|pati\b|husband|wife|patni"
+    r"|पिताजी|पिता|पापा|माताजी|माता|मम्मी|अम्मा|पति|पत्नी|दादा|दादी"
+    r"|ತಂದೆ|ಅಪ್ಪ|ತಾಯಿ|ಅಮ್ಮ",
     re.I,
 )
 NEG = re.compile(
@@ -1204,11 +1206,11 @@ def extract(raw: str) -> Extraction:
             years = int(number)
             if years < 1 or years > 120:
                 continue
-            window = text[max(0, match.start() - 28) : match.start()]
+            window = text[max(0, match.start() - 40) : match.end()]
+            # A kin word beside the number is the elder, never the caller.
+            # A later caller age does not replace one already heard in this turn.
             field = "senior_age" if KIN.search(window) else "age"
-            if field in values and field != "senior_age":
-                continue
-            if field == "age" and "age" in values:
+            if field in values:
                 continue
             put(field, years, match.start(), match.end())
 
@@ -1216,7 +1218,7 @@ def extract(raw: str) -> Extraction:
     if loss and not _negated(text, loss.start(), loss.end()):
         put("crop_loss", True, loss.start(), loss.end())
 
-    bpl = re.search(r"\bbpl\b|बीपीएल|below poverty", text, re.I)
+    bpl = re.search(r"\bbpl\b|बीपीएल|बी\s*पी\s*एल|below poverty", text, re.I)
     if bpl:
         put("bpl", not _negated(text, bpl.start(), bpl.end()), bpl.start(), bpl.end())
 

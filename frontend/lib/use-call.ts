@@ -53,6 +53,7 @@ export type Health = {
   tts: string;
   voice: string;
   llm: string;
+  llm_error?: string;
   schemes: number;
   sample_rate: number;
 };

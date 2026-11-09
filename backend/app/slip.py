@@ -1,15 +1,23 @@
-"""CSC Ready Slip as a one-page PDF. Portal vocabulary is Latin, so a CSC operator can type from it."""
+"""CSC Ready Slip as a one-page PDF. Portal vocabulary is Latin, so a CSC operator can type from it.
+
+Heard quotes keep the caller's words. Noto Sans covers Latin. Noto Sans
+Devanagari and Noto Sans Kannada are fallbacks, both OFL. See fonts/OFL.txt.
+"""
 
 from __future__ import annotations
 
 import io
 import re
 from datetime import date
+from pathlib import Path
 
 import qrcode
 from fpdf import FPDF
+from fpdf.errors import FPDFException
 
 from app.engine import Brain
+
+_FONTS = Path(__file__).resolve().parent / "fonts"
 
 _LONG_NUMBER = re.compile(r"\d{10,}")
 
@@ -71,9 +79,20 @@ def _qr_png(payload: str) -> io.BytesIO:
 
 
 def _pdf_text(value: str) -> str:
-    """Helvetica is Latin-1. Portal values are English; anything else becomes a readable stand-in."""
-    cleaned = value.replace("\u2014", "-").replace("\u2013", "-").replace("\u2019", "'")
-    return cleaned.encode("latin-1", "replace").decode("latin-1")
+    """Straight quotes and dashes. The body font can draw Devanagari and Kannada."""
+    return (
+        (value or "")
+        .replace("\u2014", "-")
+        .replace("\u2013", "-")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+    )
+
+
+def _use_body_font(pdf: FPDF, size: float) -> None:
+    pdf.set_font("NotoSans", size=size)
+    pdf.set_fallback_fonts(["NotoSansDevanagari", "NotoSansKannada"], exact_match=False)
 
 
 def build_pdf(brain: Brain) -> bytes:
@@ -82,6 +101,9 @@ def build_pdf(brain: Brain) -> bytes:
 
 def render_pdf(snap: dict) -> bytes:
     pdf = FPDF(format="A4", unit="mm")
+    pdf.add_font("NotoSans", "", str(_FONTS / "NotoSans-Regular.ttf"))
+    pdf.add_font("NotoSansDevanagari", "", str(_FONTS / "NotoSansDevanagari-Regular.ttf"))
+    pdf.add_font("NotoSansKannada", "", str(_FONTS / "NotoSansKannada-Regular.ttf"))
     pdf.set_auto_page_break(auto=True, margin=16)
     pdf.set_left_margin(12)
     pdf.set_right_margin(46)
@@ -104,8 +126,15 @@ def render_pdf(snap: dict) -> bytes:
 
     # fpdf2 leaves the cursor on the right of a multi_cell unless new_x is set.
     # The next line then starts a cell-width further right and walks off the page.
-    def block(text: str, height: float, fill: bool = False) -> None:
-        pdf.multi_cell(148, height, _pdf_text(text), fill=fill, new_x="LMARGIN", new_y="NEXT")
+    def block(text: str, height: float, fill: bool = False, size: float = 10) -> None:
+        _use_body_font(pdf, size)
+        cleaned = _pdf_text(text)
+        try:
+            pdf.multi_cell(148, height, cleaned, fill=fill, new_x="LMARGIN", new_y="NEXT")
+        except FPDFException:
+            # A script we do not ship a font for. Drop the heard quote rather than print ?.
+            dropped = re.sub(r'\s*heard:\s*"[^"]*"', "", cleaned)
+            pdf.multi_cell(148, height, dropped, fill=fill, new_x="LMARGIN", new_y="NEXT")
 
     pdf.set_xy(12, 30)
     pdf.set_text_color(90, 40, 20)
@@ -114,6 +143,7 @@ def render_pdf(snap: dict) -> bytes:
         "Indicative only. The CSC and the government portal decide. "
         "This is a practice slip. No Aadhaar, PAN, or phone number is printed.",
         4.5,
+        size=9,
     )
 
     pdf.ln(1)
@@ -176,5 +206,6 @@ def render_pdf(snap: dict) -> bytes:
         "Scan the code for the same note you can paste into an SMS or WhatsApp chat. "
         "JanVaani does not send the message itself.",
         4,
+        size=8,
     )
     return bytes(pdf.output())
