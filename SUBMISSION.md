@@ -4,7 +4,7 @@ Paste this into the Gnani form. Deadline 10 Nov 2026, 23:59 IST.
 
 Do not post the drafts below until you approve them. A live LinkedIn or X post is required before the form will accept the entry. This file does not submit anything.
 
-The running site is https://janvaani-gnani.vercel.app. The voice API is https://janvaani-api-1eve.onrender.com. This branch is not deployed. Production still speaks with Gnani. Fixes that are not live yet: Timbre WAV sizes, redacting a Groq organization id on `/api/health`, a lower reasoning budget for gpt-oss, and keeping Ready Slip PDF lines on the page. The PDF from the current server walks each line further right.
+The running site is https://janvaani-gnani.vercel.app. The voice API is https://janvaani-api-1eve.onrender.com. Pull request 5 was merged to main on 9 Nov 2026 and both deploys finished: Vercel production for that commit is READY, and Render `janvaani-api` reported success. Production now returns a normal WAV size from `/api/tts` and keeps Ready Slip lines on the left of the page.
 
 ## Project title
 
@@ -25,7 +25,7 @@ A citizen talking the way they would at the counter, in Hindi, Hinglish, Kannada
 
 No other speech vendor is called.
 
-Optional, and not a Gnani model: Groq `openai/gpt-oss-20b` phrases the reply and may fill an empty field. The 19 scheme verdicts stay in code. On 8 Nov 2026 the deployed Groq key returned HTTP 429, tokens per day, so the checked call used the fixed Hindi lines. `llm` on that turn was `fallback`.
+Optional, and not a Gnani model: Groq `openai/gpt-oss-20b` phrases the reply and may fill an empty field. The 19 scheme verdicts stay in code. On 8 Nov 2026 the deployed Groq key returned HTTP 429, tokens per day, so that call used the fixed Hindi lines. On 9 Nov 2026 `/api/health` showed an empty `llm_error`. One typed call was phrased by the model (`llm: used`). The recorded speech call still used the fixed line. Eligibility did not change.
 
 ## What was checked on 8 Nov 2026
 
@@ -38,6 +38,14 @@ Against the deployed API, not a local mock:
 - A typed Kolar line filled Kolar, Karnataka, farmer, 2 acres, tomato, age 45, BPL, elder 72. Rules listed PM-KISAN, PM Fasal Bima, Ayushman Bharat, Ayushman Vay Vandana, old-age pension, and e-Shram. Slip status was `draft`.
 
 No real phone number, Aadhaar, PAN, or recorded citizen call was used. There is no live Exotel or Twilio number.
+
+## What was checked on 9 Nov 2026, after the deploy
+
+- `GET /api/health` returned `speech: gnani`, Prisma `gnani-prisma-v2.5`, Timbre `timbre-v3.0`, voice Shivani, 19 schemes, and an empty `llm_error`.
+- A Hindi Timbre wav was a normal RIFF file. The data size matched the bytes on disk. Python's wave module read 2.24 seconds. It was not the old `0xFFFFFFFF` streaming header.
+- `backend/scripts/probe_deployed.py` failed once: Hindi `/api/stt` returned HTTP 500 twice. The same clip, sent again immediately, transcribed as "नमस्ते, मैं जनवाणी हूँ।" A full probe then exited 0. Hindi came back as "नमस्ते, मैं जनवानी हूँ।" Kannada came back as "ನಮಸ್ಕಾರ ನಾನು ಜನವಾಣಿ".
+- A production slip PDF (JV-0833) has every text line starting at x 36.85. The lines stay on the page. Devanagari inside a "heard" quote is replaced by question marks because the slip font is Helvetica. The English values and scheme names are readable.
+- The speech demo did not use the canned demo button. There is no microphone on this machine. Chrome's fake mic played a Timbre wav of one practice household sentence, and that same wav was played out so the recording has it. Prisma, on the live call socket, transcribed "मैं कोलार के पास एक गाँव से हूँ। दो एकड़ में टमाटर उगाता हूँ। उम्र पैंतालीस साल है। इस बार बारिश से फसल खराब हो गई।" and a following chunk "बी पी एल कार्ड है। पिताजी बहत्तर साल के हैं।" Timbre spoke the reply. The slip was draft JV-0833, with PM-KISAN, PM Fasal Bima, Ayushman Vay Vandana, MGNREGA, and e-Shram. The downloaded PDF was opened from production.
 
 ## Solo contribution
 
