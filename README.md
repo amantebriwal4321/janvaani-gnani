@@ -1,5 +1,7 @@
 # JanVaani
 
+**One-page pitch:** [PITCH.md](PITCH.md) ([PDF](docs/JanVaani-Pitch.pdf))
+
 A citizen speaks at a CSC counter. JanVaani fills the welfare form, checks 19 schemes with a fixed rule, and prints a Ready Slip.
 
 Gnani Prisma writes down the words. Gnani Timbre, voice Shivani, speaks the reply. The model never decides who qualifies.
