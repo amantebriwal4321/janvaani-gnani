@@ -34,7 +34,7 @@ Round trip through the Render host, 9 Nov 2026, five runs, Hindi clip "नमस
 
 These are wall times for the JanVaani route, including the hop to `api.vachana.ai`. Not a Gnani benchmark.
 
-Run locally with `./dev.sh`. Desk on port 43123, API on port 8766. Tests: `cd backend && ../.venv/bin/python -m pytest -q` (64 tests) and `node --experimental-strip-types tests/desk-status.test.ts`.
+Run locally with `./dev.sh`. Desk on port 43123, API on port 8766. Tests: `cd backend && ../.venv/bin/python -m pytest -q` (65 tests) and `node --experimental-strip-types tests/desk-status.test.ts`.
 
 A voice desk for government welfare forms. The caller speaks in Hindi, Hinglish, Kannada, Telugu, Tamil, Marathi, Bengali, Malayalam, or English. JanVaani fills the form, checks schemes with a fixed rule, and prints a CSC Ready Slip.
 
