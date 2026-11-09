@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.engine import Brain
 from app.extract import extract
-from app.llm import LLMTurn
+from app.llm import LLMTurn, completion_limits
 from app.main import app
 from app.models import Profile
 import app.llm as llm_mod
@@ -179,6 +179,11 @@ def test_rejected_groq_model_is_retried_and_shown_on_health(monkeypatch):
             assert "gsk-test" not in str(json)
             calls.append(json["model"])
             if json["model"] == "llama-3.1-8b-instant":
+                assert "reasoning_effort" not in json
+            else:
+                assert json["reasoning_effort"] == "low"
+                assert json["max_completion_tokens"] == 700
+            if json["model"] == "llama-3.1-8b-instant":
                 return Resp(400, {"error": {"message": "The model has been decommissioned"}})
             return Resp(
                 200,
@@ -222,6 +227,58 @@ def test_rejected_groq_model_is_retried_and_shown_on_health(monkeypatch):
         assert body["llm"] == "openai/gpt-oss-20b"
         assert body["llm_error"] == ""
         assert "rejected" in body["llm_notice"]
+    finally:
+        _clear_llm_status()
+
+
+def test_rate_limit_body_drops_the_provider_org(monkeypatch):
+    _clear_llm_status()
+    monkeypatch.setattr(settings, "llm_model", "openai/gpt-oss-20b")
+    monkeypatch.setattr(settings, "llm_api_key", "gsk-test")
+
+    class Client:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            assert json["reasoning_effort"] == "low"
+
+            class Resp:
+                status_code = 429
+                text = (
+                    '{"error":{"message":"Rate limit reached in organization '
+                    '`org_01EXAMPLEKEY123` service tier on tokens per day"}}'
+                )
+
+                def json(self):
+                    return {}
+
+                def raise_for_status(self) -> None:
+                    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+                    response = httpx.Response(429, request=request, text=self.text)
+                    raise httpx.HTTPStatusError("bad", request=request, response=response)
+
+            return Resp()
+
+    monkeypatch.setattr(llm_mod.httpx, "AsyncClient", Client)
+    try:
+        try:
+            _run(llm_mod.LLMClient().complete_turn("नमस्ते", Profile(), "hi", None, [], "", []))
+        except httpx.HTTPStatusError:
+            pass
+        else:
+            raise AssertionError("429 should raise")
+        assert "429" in llm_mod._last_error
+        assert "org_" not in llm_mod._last_error
+        assert "EXAMPLEKEY" not in llm_mod._last_error
+        assert completion_limits("llama-3.3-70b-versatile") == {}
+        assert completion_limits("openai/gpt-oss-20b")["reasoning_effort"] == "low"
     finally:
         _clear_llm_status()
 

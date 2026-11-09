@@ -102,14 +102,18 @@ def render_pdf(snap: dict) -> bytes:
 
     pdf.image(_qr_png(snap["share_text"]), x=166, y=30, w=32)
 
+    # fpdf2 leaves the cursor on the right of a multi_cell unless new_x is set.
+    # The next line then starts a cell-width further right and walks off the page.
+    def block(text: str, height: float, fill: bool = False) -> None:
+        pdf.multi_cell(148, height, _pdf_text(text), fill=fill, new_x="LMARGIN", new_y="NEXT")
+
     pdf.set_xy(12, 30)
     pdf.set_text_color(90, 40, 20)
     pdf.set_font("Helvetica", "", 9)
-    pdf.multi_cell(
-        148,
-        4.5,
+    block(
         "Indicative only. The CSC and the government portal decide. "
         "This is a practice slip. No Aadhaar, PAN, or phone number is printed.",
+        4.5,
     )
 
     pdf.ln(1)
@@ -120,9 +124,9 @@ def render_pdf(snap: dict) -> bytes:
     if snap["rows"]:
         for row in snap["rows"]:
             heard = f'   heard: "{row["heard"]}"' if row.get("heard") else ""
-            pdf.multi_cell(148, 5, _pdf_text(f"{row['label']}: {row['value']}{heard}"))
+            block(f"{row['label']}: {row['value']}{heard}", 5)
     else:
-        pdf.multi_cell(148, 5, "Nothing filled yet. Say your place, work, and family on the call.")
+        block("Nothing filled yet. Say your place, work, and family on the call.", 5)
 
     pdf.ln(1)
     pdf.set_font("Helvetica", "B", 12)
@@ -130,14 +134,14 @@ def render_pdf(snap: dict) -> bytes:
     pdf.set_font("Helvetica", "", 10)
     shown = [item for item in snap["matches"] if item["status"] in ("qualify", "likely")]
     if not shown:
-        pdf.multi_cell(148, 5, "No scheme is confirmed yet.")
+        block("No scheme is confirmed yet.", 5)
     for item in shown:
         mark = "APPLY" if item["status"] == "qualify" else "CHECK"
         reason = item["reasons"][0] if item["reasons"] else ""
         pdf.set_font("Helvetica", "B", 10)
-        pdf.multi_cell(148, 5, _pdf_text(f"[{mark}] {item['name']}  ({item['authority']})"))
+        block(f"[{mark}] {item['name']}  ({item['authority']})", 5)
         pdf.set_font("Helvetica", "", 10)
-        pdf.multi_cell(148, 5, _pdf_text(f"{reason}  Portal: {item['portal']}"))
+        block(f"{reason}  Portal: {item['portal']}", 5)
 
     pdf.ln(1)
     pdf.set_font("Helvetica", "B", 12)
@@ -145,28 +149,32 @@ def render_pdf(snap: dict) -> bytes:
     pdf.set_font("Helvetica", "", 10)
     if snap["documents"]:
         for doc in snap["documents"]:
-            pdf.multi_cell(148, 5, _pdf_text(f"- {doc}"))
+            block(f"- {doc}", 5)
     else:
-        pdf.multi_cell(148, 5, "- Aadhaar, if the CSC asks for it. Do not read the number aloud on this call.")
+        block("- Aadhaar, if the CSC asks for it. Do not read the number aloud on this call.", 5)
 
     if snap["fix_first"]:
         pdf.ln(2)
         pdf.set_fill_color(255, 228, 214)
         pdf.set_text_color(120, 32, 18)
         pdf.set_font("Helvetica", "B", 11)
-        pdf.multi_cell(148, 6, "Fix this first", fill=True)
+        block("Fix this first", 6, fill=True)
         pdf.set_font("Helvetica", "", 10)
         for note in snap["fix_first"]:
-            pdf.multi_cell(148, 5, _pdf_text(note), fill=True)
+            block(note, 5, fill=True)
         pdf.set_text_color(20, 18, 16)
 
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 7, "Where to go", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
-    pdf.multi_cell(148, 5, _pdf_text(snap["csc"]))
+    block(snap["csc"], 5)
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(80, 70, 60)
-    pdf.multi_cell(148, 4, "Scan the code for the same note you can paste into an SMS or WhatsApp chat. JanVaani does not send the message itself.")
+    block(
+        "Scan the code for the same note you can paste into an SMS or WhatsApp chat. "
+        "JanVaani does not send the message itself.",
+        4,
+    )
     return bytes(pdf.output())

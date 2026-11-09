@@ -95,8 +95,48 @@ def tts_body(text: str, language: str, container: str = "wav", sample_rate: int 
     }
 
 
+def repair_wav(data: bytes) -> bytes:
+    """Rewrite a Timbre streaming WAV.
+
+    Live Timbre responses set the RIFF size and the data chunk size to
+    0xFFFFFFFF. Python's wave module then reports a multi-day file. A normal
+    WAV is returned unchanged. Anything that is not a RIFF/WAVE passes through.
+    """
+    if len(data) < 12 or not data.startswith(b"RIFF") or data[8:12] != b"WAVE":
+        return data
+    declared = int.from_bytes(data[4:8], "little")
+    needs = declared > len(data) - 8
+    chunks: list[tuple[bytes, bytes]] = []
+    offset = 12
+    while offset + 8 <= len(data):
+        chunk = data[offset : offset + 4]
+        size = int.from_bytes(data[offset + 4 : offset + 8], "little")
+        start = offset + 8
+        remaining = len(data) - start
+        if size > remaining:
+            needs = True
+            chunks.append((chunk, data[start:]))
+            break
+        chunks.append((chunk, data[start : start + size]))
+        offset = start + size + (size % 2)
+    if not needs:
+        return data
+    payload = bytearray()
+    for chunk, body in chunks:
+        payload += chunk
+        payload += len(body).to_bytes(4, "little")
+        payload += body
+        if len(body) % 2:
+            payload += b"\x00"
+    return b"RIFF" + (4 + len(payload)).to_bytes(4, "little") + b"WAVE" + bytes(payload)
+
+
 def parse_wav(data: bytes) -> tuple[bytes, int]:
-    """PCM payload and sample rate. Non-RIFF bytes pass through as 8 kHz PCM."""
+    """PCM payload and sample rate. Non-RIFF bytes pass through as 8 kHz PCM.
+
+    A chunk size past the end of the buffer is the rest of the file. Timbre
+    uses 0xFFFFFFFF for that on a streaming WAV.
+    """
     if len(data) < 44 or not data.startswith(b"RIFF"):
         return data, 8000
     rate = 8000
@@ -106,6 +146,9 @@ def parse_wav(data: bytes) -> tuple[bytes, int]:
         chunk = data[offset : offset + 4]
         size = int.from_bytes(data[offset + 4 : offset + 8], "little")
         start = offset + 8
+        remaining = len(data) - start
+        if size > remaining:
+            size = remaining
         body = data[start : start + size]
         if chunk == b"fmt " and len(body) >= 8:
             rate = int.from_bytes(body[4:8], "little") or 8000
@@ -252,7 +295,10 @@ async def fetch_tts(text: str, language: str, container: str = "wav", sample_rat
             json=tts_body(text, language, container, sample_rate),
         )
         response.raise_for_status()
-        return response.content
+        audio = response.content
+        if container == "wav":
+            audio = repair_wav(audio)
+        return audio
 
 
 _pcm_cache: dict[tuple[str, str, str], tuple[bytes, int]] = {}
