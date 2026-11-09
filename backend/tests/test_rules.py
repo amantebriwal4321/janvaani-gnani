@@ -145,6 +145,13 @@ def test_a_rate_limit_does_not_leak_into_the_spoken_line():
     asyncio.run(run())
 
 
+def test_kannada_father_number_is_the_elder():
+    found = extract("ನಾನು ರೈತ. ವಯಸ್ಸು 45. ತಂದೆ 72.")
+    assert found.values["occupation"] == "farmer"
+    assert found.values["age"] == 45
+    assert found.values["senior_age"] == 72
+
+
 def test_kolar_farmer_extracts_the_household():
     found = extract(KOLAR)
     assert found.language == "hi-en"

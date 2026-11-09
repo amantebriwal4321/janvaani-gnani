@@ -1214,6 +1214,18 @@ def extract(raw: str) -> Extraction:
                 continue
             put(field, years, match.start(), match.end())
 
+    # "ತಂದೆ 72" has a kin word and a number, and no year-unit.
+    if "senior_age" not in values:
+        for match in re.finditer(rf"(?:{KIN.pattern})\s+({NUM})", text, re.I):
+            number = _parse_number(match.group(1))
+            if number is None:
+                continue
+            years = int(number)
+            if years < 40 or years > 120:
+                continue
+            put("senior_age", years, match.start(), match.end())
+            break
+
     loss = re.search(r"kharab|nuksan|barbad|damage|naash|ನಷ್ಟ|నష్ట|நஷ்ட|ক্ষতি", text, re.I)
     if loss and not _negated(text, loss.start(), loss.end()):
         put("crop_loss", True, loss.start(), loss.end())
