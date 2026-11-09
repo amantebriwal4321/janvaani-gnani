@@ -358,17 +358,34 @@ async def synthesize_rest(text: str, language: str, container: str = "wav") -> b
     return await fetch_tts(text, language, container)
 
 
+class PrismaSTTError(Exception):
+    """Prisma REST failed after one retry. The status is the last HTTP code."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"Prisma STT HTTP {status}")
+        self.status = status
+
+
 async def transcribe_rest(audio: bytes, filename: str, language: str, locked: bool = True) -> str:
-    """Short clip via POST /stt/v3. Fields are audio_file and language_code only."""
+    """Short clip via POST /stt/v3. One retry on HTTP 500, then PrismaSTTError."""
     url = settings.gnani_base_url.rstrip("/") + "/stt/v3"
     files = {"audio_file": (filename or "clip.wav", audio, "audio/wav")}
-    async with httpx.AsyncClient(timeout=40) as client:
-        response = await client.post(
-            url,
-            headers={"X-API-Key-ID": settings.gnani_api_key},
-            files=files,
-            data=stt_form(language, locked=locked),
-        )
+    last_status = 500
+    for attempt in (1, 2):
+        async with httpx.AsyncClient(timeout=40) as client:
+            response = await client.post(
+                url,
+                headers={"X-API-Key-ID": settings.gnani_api_key},
+                files=files,
+                data=stt_form(language, locked=locked),
+            )
+        if response.status_code >= 500 and attempt == 1:
+            last_status = response.status_code
+            await asyncio.sleep(0.4)
+            continue
+        if response.status_code >= 500:
+            raise PrismaSTTError(response.status_code)
         response.raise_for_status()
         body = response.json()
-    return str(body.get("transcript") or "").strip()
+        return str(body.get("transcript") or "").strip()
+    raise PrismaSTTError(last_status)

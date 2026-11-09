@@ -1,5 +1,6 @@
 """Rule engine, extractor, slip, and the mock call socket."""
 
+import io
 import json
 import re
 import zlib
@@ -47,6 +48,36 @@ def _ids(profile: Profile, status: str) -> set[str]:
     return {item.scheme_id for item in match_all(profile) if item.status == status}
 
 
+def test_slip_pdf_keeps_devanagari_and_kannada_heard_text():
+    from pypdf import PdfReader
+
+    from app.slip import render_pdf
+
+    snap = {
+        "ref": "JV-TEST",
+        "slip": "draft",
+        "share_text": "practice",
+        "rows": [
+            {"label": "Age", "value": "45", "heard": "उम्र पैंतालीस साल"},
+            {"label": "Eldest family member", "value": "72", "heard": "पिताजी बहत्तर साल"},
+            {"label": "Place", "value": "Kolar", "heard": "ನಮಸ್ಕಾರ"},
+        ],
+        "matches": [],
+        "documents": [],
+        "fix_first": [],
+        "csc": "Common Service Centre for Kolar, Karnataka.",
+    }
+    pdf = render_pdf(snap)
+    assert b"????" not in pdf
+    text = PdfReader(io.BytesIO(pdf)).pages[0].extract_text()
+    assert "पैंतालीस" in text
+    assert "पिताजी" in text
+    assert "ನಮಸ್ಕಾರ" in text
+    assert "Age: 45" in text
+    assert "72" in text
+    assert "?" not in text
+
+
 def test_bias_words_are_letters_only():
     assert BIAS_WORDS
     assert len(BIAS_WORDS) <= 100
@@ -57,6 +88,61 @@ def test_bias_words_are_letters_only():
 def test_catalog_has_more_than_ten_schemes():
     assert len(CATALOG) >= 16
     assert len({scheme.id for scheme in CATALOG}) == len(CATALOG)
+
+
+def test_devanagari_father_age_does_not_replace_the_caller():
+    """The live demo pair: caller 45, father 72. The elder must not become the caller."""
+    first = (
+        "मैं कोलार के पास एक गाँव से हूँ। दो एकड़ में टमाटर उगाता हूँ। "
+        "उम्र पैंतालीस साल है। इस बार बारिश से फसल खराब हो गई।"
+    )
+    second = "बी पी एल कार्ड है। पिताजी बहत्तर साल के हैं।"
+    opening = extract(first)
+    assert opening.values["age"] == 45
+    assert "senior_age" not in opening.values
+    follow = extract(second)
+    assert follow.values.get("age") is None
+    assert follow.values["senior_age"] == 72
+    together = extract(first + " " + second)
+    assert together.values["age"] == 45
+    assert together.values["senior_age"] == 72
+
+    async def run():
+        brain = Brain()
+        await brain.utterance(first, None)
+        await brain.utterance(second, None)
+        assert brain.profile.age == 45
+        assert brain.profile.senior_age == 72
+        assert brain.profile.bpl is True
+        vay = next(item for item in match_all(brain.profile) if item.scheme_id == "vay_vandana")
+        assert vay.status == "qualify"
+        reason = " ".join(vay.reasons).lower()
+        assert "elder at home" in reason
+        assert "the caller is 70" not in reason
+
+    import asyncio
+
+    asyncio.run(run())
+
+
+def test_a_rate_limit_does_not_leak_into_the_spoken_line():
+    class Busy:
+        async def complete_turn(self, **_kwargs):
+            raise RuntimeError("HTTP 429 tokens per day")
+
+        async def extract_slot(self, **_kwargs):
+            raise RuntimeError("HTTP 429 tokens per day")
+
+    async def run():
+        brain = Brain()
+        result = await brain.utterance("मैं कोलार का किसान हूँ, उम्र पैंतालीस साल।", Busy())
+        assert "429" not in result.reply
+        assert "rate" not in result.reply.lower()
+        assert brain.profile.age == 45
+
+    import asyncio
+
+    asyncio.run(run())
 
 
 def test_kolar_farmer_extracts_the_household():

@@ -115,7 +115,12 @@ async def stt_clip(file: UploadFile = File(...), language: str = Form("hi")) -> 
     audio = await file.read()
     if not audio:
         raise HTTPException(400, "Empty audio.")
-    transcript = await transcribe_rest(audio, file.filename or "clip.wav", language)
+    from app.gnani import PrismaSTTError
+
+    try:
+        transcript = await transcribe_rest(audio, file.filename or "clip.wav", language)
+    except PrismaSTTError:
+        raise HTTPException(503, "Prisma could not transcribe that clip. Try once more in a moment.")
     return {"transcript": transcript, "language": language}
 
 

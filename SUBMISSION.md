@@ -12,7 +12,7 @@ JanVaani
 
 ## Problem
 
-At a Common Service Centre the citizen has to know which welfare scheme fits the household. JanVaani takes a spoken description, fills the form, checks 19 schemes with a fixed rule, and prints a CSC Ready Slip. The voice does not decide eligibility.
+At a CSC counter the citizen rarely knows which scheme fits. JanVaani listens, fills the form, checks 19 schemes in code, and prints a Ready Slip. The voice does not decide eligibility.
 
 ## Who uses it
 
@@ -25,7 +25,9 @@ A citizen talking the way they would at the counter, in Hindi, Hinglish, Kannada
 
 No other speech vendor is called.
 
-Optional, and not a Gnani model: Groq `openai/gpt-oss-20b` phrases the reply and may fill an empty field. The 19 scheme verdicts stay in code. On 8 Nov 2026 the deployed Groq key returned HTTP 429, tokens per day, so that call used the fixed Hindi lines. On 9 Nov 2026 `/api/health` showed an empty `llm_error`. One typed call was phrased by the model (`llm: used`). The recorded speech call still used the fixed line. Eligibility did not change.
+Optional, and not a Gnani model: Groq `openai/gpt-oss-20b` may phrase the reply. If it returns HTTP 429, the caller hears the fixed lines and the desk says so. Scheme verdicts stay in code.
+
+The caller's age and an elder's age stay separate. "उम्र पैंतालीस साल" is 45. "पिताजी बहत्तर साल" is an elder at home, 72. Ayushman Vay Vandana then applies to the elder, not the caller. Heard quotes on the PDF use Noto Sans Devanagari and Noto Sans Kannada, so Hindi and Kannada are drawn instead of question marks.
 
 ## What was checked on 8 Nov 2026
 
@@ -49,7 +51,7 @@ No real phone number, Aadhaar, PAN, or recorded citizen call was used. There is 
 
 ## Solo contribution
 
-Solo. One person built the browser desk, the FastAPI call socket, the Prisma and Timbre adapters, the 19-scheme rule engine, and the Ready Slip. There is no teammate.
+Solo. I built the desk, the call socket, the Prisma and Timbre adapters, the 19 scheme rules, and the Ready Slip. No teammate.
 
 ## Draft post
 

@@ -118,12 +118,14 @@ class PMJAY(Scheme):
 @dataclass
 class VayVandana(Scheme):
     def judge(self, profile: Profile) -> Verdict:
-        ages = [age for age in (profile.age, profile.senior_age) if age is not None]
-        if not ages:
+        caller = profile.age or 0
+        elder = profile.senior_age or 0
+        if caller == 0 and elder == 0:
             return need("age", reason="Age in the house is not known yet.")
-        if max(ages) >= 70:
-            who = "the caller" if (profile.age or 0) >= 70 else "a family member"
-            return qualify(f"{who.capitalize()} is 70 or older. Vay Vandana covers every citizen in that age.")
+        if elder >= 70 and caller < 70:
+            return qualify("An elder at home is 70 or older. Vay Vandana covers that person, not the caller.")
+        if caller >= 70:
+            return qualify("The caller is 70 or older. Vay Vandana covers every citizen in that age.")
         return no("Nobody mentioned in the house is 70 yet.")
 
 

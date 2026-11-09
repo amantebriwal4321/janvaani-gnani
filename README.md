@@ -1,5 +1,41 @@
 # JanVaani
 
+A citizen speaks at a CSC counter. JanVaani fills the welfare form, checks 19 schemes with a fixed rule, and prints a Ready Slip.
+
+Gnani Prisma writes down the words. Gnani Timbre, voice Shivani, speaks the reply. The model never decides who qualifies.
+
+Practice households only. No real Aadhaar, phone number, or PAN.
+
+## For judges
+
+Live desk: https://janvaani-gnani.vercel.app
+Voice API: https://janvaani-api-1eve.onrender.com
+
+```mermaid
+flowchart LR
+  browser["Next.js desk on Vercel"] -->|"wss /ws/call PCM 8 kHz"| api["FastAPI on Render"]
+  api -->|"Prisma STT"| prisma["wss://api.vachana.ai/stt/v3/stream"]
+  api -->|"Timbre TTS"| timbre["POST /api/v1/tts/inference"]
+  api --> rules["19 scheme rules in code"]
+```
+
+Prisma and Timbre are called only from `backend/app/gnani.py`.
+
+- Prisma streaming: `STTStream.connect` opens `wss://api.vachana.ai/stt/v3/stream`. `backend/app/session.py` `_listen` owns that socket for the call.
+- Prisma REST: `transcribe_rest` posts `/stt/v3`. The desk route is `POST /api/stt` in `backend/app/main.py`. A HTTP 500 is tried once more after 0.4 s, then the caller gets "Prisma could not transcribe that clip."
+- Timbre: `fetch_tts` posts `/api/v1/tts/inference`. `session.py` `_speak` plays those bytes. `POST /api/tts` is the same call for a clip.
+
+Round trip through the Render host, 9 Nov 2026, five runs, Hindi clip "नमस्ते, मैं जनवाणी हूँ।":
+
+| Call | Times (s) | Median (s) |
+| --- | --- | --- |
+| `POST /api/tts` | 1.76, 1.32, 0.95, 1.43, 1.23 | 1.32 |
+| `POST /api/stt` | 0.68, 0.66, 0.61, 0.91, 0.71 | 0.68 |
+
+These are wall times for the JanVaani route, including the hop to `api.vachana.ai`. Not a Gnani benchmark.
+
+Run locally with `./dev.sh`. Desk on port 43123, API on port 8766. Tests: `cd backend && ../.venv/bin/python -m pytest -q` (64 tests) and `node --experimental-strip-types tests/desk-status.test.ts`.
+
 A voice desk for government welfare forms. The caller speaks in Hindi, Hinglish, Kannada, Telugu, Tamil, Marathi, Bengali, Malayalam, or English. JanVaani fills the form, checks schemes with a fixed rule, and prints a CSC Ready Slip.
 
 Speech is Gnani only: [Prisma](https://docs.gnani.ai) for speech-to-text and Timbre for speech. There is no second speech vendor. When `GNANI_API_KEY` is empty, the same call runs in mock mode.

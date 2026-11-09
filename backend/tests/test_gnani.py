@@ -221,3 +221,83 @@ def test_speech_start_barges_in():
             SESSIONS.pop(session.brain.session_id, None)
 
     asyncio.run(run())
+
+
+def test_rest_stt_retries_one_http_500_then_says_so(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.gnani import PrismaSTTError, transcribe_rest
+    from app.main import app
+
+    calls = {"n": 0}
+
+    class Response:
+        def __init__(self, status: int, payload: dict | None = None) -> None:
+            self.status_code = status
+            self._payload = payload or {}
+            self.text = ""
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                import httpx
+
+                request = httpx.Request("POST", "https://api.vachana.ai/stt/v3")
+                raise httpx.HTTPStatusError("bad", request=request, response=httpx.Response(self.status_code, request=request))
+
+    class Client:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return Response(500)
+            return Response(200, {"transcript": "नमस्ते"})
+
+    async def no_sleep(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.gnani.httpx.AsyncClient", Client)
+    monkeypatch.setattr("app.gnani.asyncio.sleep", no_sleep)
+    heard = asyncio.run(transcribe_rest(b"RIFF", "clip.wav", "hi"))
+    assert heard == "नमस्ते"
+    assert calls["n"] == 2
+
+    calls["n"] = 0
+
+    class AlwaysDown(Client):
+        async def post(self, *args, **kwargs):
+            calls["n"] += 1
+            return Response(500)
+
+    monkeypatch.setattr("app.gnani.httpx.AsyncClient", AlwaysDown)
+    try:
+        asyncio.run(transcribe_rest(b"RIFF", "clip.wav", "hi"))
+    except PrismaSTTError as exc:
+        assert exc.status == 500
+    else:
+        raise AssertionError("a second 500 should raise")
+    assert calls["n"] == 2
+
+    from app.config import settings
+
+    async def boom(*_args, **_kwargs):
+        raise PrismaSTTError(500)
+
+    import app.gnani as gnani_mod
+
+    monkeypatch.setattr(settings, "gnani_api_key", "test-key")
+    monkeypatch.setattr(gnani_mod, "transcribe_rest", boom)
+    with TestClient(app) as api:
+        response = api.post("/api/stt", files={"file": ("clip.wav", b"RIFF", "audio/wav")}, data={"language": "hi"})
+    assert response.status_code == 503
+    assert "Prisma could not transcribe" in response.json()["detail"]

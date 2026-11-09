@@ -32,10 +32,10 @@ export function Landing({
           A citizen talks. JanVaani fills the scheme form, checks 19 government schemes, and prints a CSC Ready Slip with a QR code.
         </p>
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <button type="button" className="cta" onClick={onStart} disabled={!canStart}>
+          <button type="button" className="cta w-full sm:w-auto" onClick={onStart} disabled={!canStart}>
             Start talking
           </button>
-          <button type="button" className="cta cta-quiet" onClick={onDemo} disabled={!canStart}>
+          <button type="button" className="cta cta-quiet w-full sm:w-auto" onClick={onDemo} disabled={!canStart}>
             Play 60-second demo
           </button>
         </div>
